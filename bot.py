@@ -102,12 +102,12 @@ db = load_data()
 
 # ------------------- Система ролей -------------------
 ROLES = {
-    "6": {"name": "Системный администратор", "level": 6, "description": "👑 Полный доступ ко всем ссылкам"},
-    "5": {"name": "Куратор отдела", "level": 5, "description": "🎯 Доступ: агенты, базовые, премиум, VIP, админ"},
-    "4": {"name": "Наставник отдела", "level": 4, "description": "📚 Доступ: агенты, базовые, премиум, VIP"},
-    "3": {"name": "Руководитель отдела", "level": 3, "description": "📋 Доступ: агенты, базовые, премиум"},
-    "2": {"name": "Заместитель руководителя", "level": 2, "description": "📝 Доступ: агенты, базовые"},
-    "1": {"name": "Сотрудник отдела", "level": 1, "description": "👨‍💻 Доступ: только агенты"}
+    "6": {"name": "Системный администратор", "level": 6, "emoji": "👑", "description": "Полный доступ ко всем командам и ссылкам"},
+    "5": {"name": "Куратор отдела", "level": 5, "emoji": "🎯", "description": "Управляет отделом, назначает роли до 4 уровня"},
+    "4": {"name": "Наставник отдела", "level": 4, "emoji": "📚", "description": "Обучает сотрудников, управляет доступом"},
+    "3": {"name": "Руководитель отдела", "level": 3, "emoji": "📋", "description": "Управляет задачами и сотрудниками"},
+    "2": {"name": "Заместитель руководителя", "level": 2, "emoji": "📝", "description": "Помогает с квестами и статистикой"},
+    "1": {"name": "Сотрудник отдела", "level": 1, "emoji": "👨‍💻", "description": "Выполняет квесты, базовый доступ"}
 }
 
 def get_user_role_level(user_id):
@@ -123,6 +123,12 @@ def get_user_role_name(user_id):
     if user_id in SYSTEM_ADMINS:
         return "Системный администратор"
     return db["staff_quest"].get(str(user_id), "Нет роли")
+
+def get_role_emoji_by_level(level):
+    for role_data in ROLES.values():
+        if role_data["level"] == level:
+            return role_data["emoji"]
+    return "👤"
 
 def has_permission(user_id, permission):
     if user_id in SYSTEM_ADMINS:
@@ -259,8 +265,10 @@ def get_user_name(user_id):
     return f"ID{user_id}"
 
 def get_role_emoji(level):
-    emojis = {6: "👑", 5: "🎯", 4: "📚", 3: "📋", 2: "📝", 1: "👨‍💻", 0: "👤"}
-    return emojis.get(level, "👤")
+    for role_data in ROLES.values():
+        if role_data["level"] == level:
+            return role_data["emoji"]
+    return "👤"
 
 def get_available_links_list(user_id):
     """Получить список доступных ссылок для пользователя"""
@@ -553,6 +561,20 @@ def process_command(event, text, prefix):
 `{current_prefix}links remove <категория> <номер>` - удалить ссылку
 `{current_prefix}getquests <номер>` - использовать ссылку
 
+**Управление ролями:**
+`{current_prefix}setrole @user <1-6>` - назначить роль
+
+**Расшифровка цифр:**
+6 👑 Системный администратор - полный доступ
+5 🎯 Куратор отдела - управляет отделом
+4 📚 Наставник отдела - обучает сотрудников
+3 📋 Руководитель отдела - управляет задачами
+2 📝 Заместитель руководителя - помогает с квестами
+1 👨‍💻 Сотрудник отдела - выполняет квесты
+
+`{current_prefix}removerole @user` - снять роль
+`{current_prefix}stafflist` - список сотрудников
+
 **Друзья:**
 `{current_prefix}addfriend @user` - добавить в друзья
 `{current_prefix}delfriend @user` - удалить из друзей
@@ -586,18 +608,27 @@ def process_command(event, text, prefix):
 
 ━━━━━━━━━━━━━━━━━━━━━
 **👥 Управление персоналом:**
-`{current_prefix}setrole @user <роль/цифра>` - назначить роль
+`{current_prefix}setrole @user <1-6>` - назначить роль
 `{current_prefix}removerole @user` - снять роль
 `{current_prefix}stafflist` - список сотрудников
 
 ━━━━━━━━━━━━━━━━━━━━━
-**🎯 Роли и доступ к ссылкам:**
-6 👑 Системный администратор - все ссылки
-5 🎯 Куратор отдела - агенты, базовые, премиум, VIP, админ
-4 📚 Наставник отдела - агенты, базовые, премиум, VIP
-3 📋 Руководитель отдела - агенты, базовые, премиум
-2 📝 Заместитель руководителя - агенты, базовые
-1 👨‍💻 Сотрудник отдела - только агенты"""
+**🎯 Роли (1-6):**
+6 👑 Системный администратор - полный доступ
+5 🎯 Куратор отдела - управляет отделом
+4 📚 Наставник отдела - обучает сотрудников
+3 📋 Руководитель отдела - управляет задачами
+2 📝 Заместитель руководителя - помогает с квестами
+1 👨‍💻 Сотрудник отдела - выполняет квесты
+
+━━━━━━━━━━━━━━━━━━━━━
+**📂 Доступ к ссылкам по ролям:**
+6 👑 - все категории
+5 🎯 - агенты, базовые, премиум, VIP, админ
+4 📚 - агенты, базовые, премиум, VIP
+3 📋 - агенты, базовые, премиум
+2 📝 - агенты, базовые
+1 👨‍💻 - только агенты"""
         reply(help_text)
     
     elif command == "ping":
@@ -913,7 +944,17 @@ def process_command(event, text, prefix):
             return
         
         if len(args) < 2:
-            reply(f"❌ Использование: {current_prefix}setrole @user <роль/цифра>")
+            reply(f"""❌ Использование: {current_prefix}setrole @user <1-6>
+
+**Расшифровка цифр:**
+6 👑 Системный администратор - полный доступ
+5 🎯 Куратор отдела - управляет отделом
+4 📚 Наставник отдела - обучает сотрудников
+3 📋 Руководитель отдела - управляет задачами
+2 📝 Заместитель руководителя - помогает с квестами
+1 👨‍💻 Сотрудник отдела - выполняет квесты
+
+Пример: {current_prefix}setrole @user 5""")
             return
         
         target_id = get_user_id_from_event(event, text)
@@ -923,21 +964,28 @@ def process_command(event, text, prefix):
         
         role_input = args[-1]
         role_map = {
-            "6": "Системный администратор", "5": "Куратор отдела",
-            "4": "Наставник отдела", "3": "Руководитель отдела",
-            "2": "Заместитель руководителя", "1": "Сотрудник отдела",
-            "Системный администратор": "Системный администратор",
-            "Куратор отдела": "Куратор отдела",
-            "Наставник отдела": "Наставник отдела",
-            "Руководитель отдела": "Руководитель отдела",
-            "Заместитель руководителя": "Заместитель руководителя",
-            "Сотрудник отдела": "Сотрудник отдела"
+            "6": "Системный администратор",
+            "5": "Куратор отдела",
+            "4": "Наставник отдела",
+            "3": "Руководитель отдела",
+            "2": "Заместитель руководителя",
+            "1": "Сотрудник отдела"
         }
         
-        role = role_map.get(role_input)
-        if not role:
-            reply("❌ Доступные роли:\n6,5,4,3,2,1\nИли полные названия")
+        if role_input not in role_map:
+            reply(f"""❌ Неверный номер роли. Доступные роли:
+
+6 👑 Системный администратор
+5 🎯 Куратор отдела
+4 📚 Наставник отдела
+3 📋 Руководитель отдела
+2 📝 Заместитель руководителя
+1 👨‍💻 Сотрудник отдела
+
+Использование: {current_prefix}setrole @user <1-6>""")
             return
+        
+        role = role_map[role_input]
         
         if target_id in SYSTEM_ADMINS and event.user_id not in SYSTEM_ADMINS:
             reply("❌ Нельзя управлять системным администратором")
@@ -958,18 +1006,16 @@ def process_command(event, text, prefix):
         
         save_data(db)
         
-        level = 0
-        for l, r in role_map.items():
-            if r == role and l.isdigit():
-                level = int(l)
-                break
-        
         log_admin_action(event.user_id, "set_role", target_id, role)
-        reply(f"✅ {get_user_name(target_id)} назначен: {role} {get_role_emoji(level)}")
+        reply(f"✅ {get_user_name(target_id)} назначен: {role} {get_role_emoji(int(role_input))}")
     
     elif command == "removerole":
         if get_user_role_level(event.user_id) < 3:
             reply("❌ Нет прав")
+            return
+        
+        if len(args) < 1:
+            reply(f"❌ Использование: {current_prefix}removerole @user")
             return
         
         target_id = get_user_id_from_event(event, text)
@@ -990,11 +1036,12 @@ def process_command(event, text, prefix):
             return
         
         if str(target_id) in db["staff_quest"]:
+            old_role = db["staff_quest"][str(target_id)]
             del db["staff_quest"][str(target_id)]
             if target_id in SYSTEM_ADMINS and target_id != ADMIN_ID:
                 SYSTEM_ADMINS.remove(target_id)
             save_data(db)
-            log_admin_action(event.user_id, "remove_role", target_id)
+            log_admin_action(event.user_id, "remove_role", target_id, old_role)
             reply(f"✅ Роль снята с {get_user_name(target_id)}")
         else:
             reply(f"ℹ️ У {get_user_name(target_id)} нет роли")
