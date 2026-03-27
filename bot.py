@@ -58,17 +58,17 @@ def load_data():
         "blocked_users": [],
         "prefix": PREFIX,
         "quests": [],
-        "links": {  # Система хранения ссылок
-            "agents": [],  # Ссылки агентов
-            "categories": {}  # Категории ссылок
+        "links": {
+            "agents": [],
+            "categories": {}
         },
-        "access_levels": {  # Уровни доступа к ссылкам
-            "1": ["agent"],  # Сотрудник отдела - доступ к агентам
+        "access_levels": {
+            "1": ["agent"],
             "2": ["agent", "basic"],
             "3": ["agent", "basic", "premium"],
             "4": ["agent", "basic", "premium", "vip"],
             "5": ["agent", "basic", "premium", "vip", "admin"],
-            "6": ["all"]  # Системный админ - все ссылки
+            "6": ["all"]
         },
         "quest_access": {str(ADMIN_ID): "all"},
         "staff_quest": {str(ADMIN_ID): "Системный администратор"},
@@ -262,6 +262,33 @@ def get_role_emoji(level):
     emojis = {6: "👑", 5: "🎯", 4: "📚", 3: "📋", 2: "📝", 1: "👨‍💻", 0: "👤"}
     return emojis.get(level, "👤")
 
+def get_available_links_list(user_id):
+    """Получить список доступных ссылок для пользователя"""
+    access_categories = get_user_link_access(user_id)
+    links = []
+    
+    if "agent" in access_categories or "all" in access_categories:
+        for link in db["links"].get("agents", []):
+            links.append(link)
+    
+    for category, category_links in db["links"].get("categories", {}).items():
+        if category in access_categories or "all" in access_categories:
+            for link in category_links:
+                links.append(link)
+    
+    return links
+
+def get_available_links(user_id):
+    """Получить форматированный список доступных ссылок"""
+    links = get_available_links_list(user_id)
+    if not links:
+        return "📭 Нет доступных ссылок"
+    
+    result = ""
+    for i, link in enumerate(links, 1):
+        result += f"{i}. {link}\n"
+    return result
+
 # ------------------- Обработка команд -------------------
 def process_command(event, text, prefix):
     global db
@@ -304,13 +331,11 @@ def process_command(event, text, prefix):
             return
         
         if len(args) < 1:
-            # Показываем доступные ссылки
             user_level = get_user_role_level(event.user_id)
             access_categories = get_user_link_access(event.user_id)
             
             result = f"🔗 **Система ссылок**\n\n👤 Ваш уровень: {user_level}\n\n"
             
-            # Показываем ссылки агентов (доступны всем)
             agents = db["links"].get("agents", [])
             if agents and ("agent" in access_categories or "all" in access_categories):
                 result += "**🤝 Ссылки агентов:**\n"
@@ -318,7 +343,6 @@ def process_command(event, text, prefix):
                     result += f"{i}. {link}\n"
                 result += "\n"
             
-            # Показываем другие категории если есть доступ
             for category, links in db["links"].get("categories", {}).items():
                 if links and (category in access_categories or "all" in access_categories):
                     category_name = {
@@ -340,7 +364,6 @@ def process_command(event, text, prefix):
         
         subcmd = args[0].lower()
         
-        # Добавление ссылки агента
         if subcmd == "add":
             if get_user_role_level(event.user_id) < 2:
                 reply("❌ Нет прав для добавления ссылок")
@@ -353,13 +376,11 @@ def process_command(event, text, prefix):
             link = args[1]
             category = args[2] if len(args) > 2 else "agent"
             
-            # Проверяем категорию
             valid_categories = ["agent", "basic", "premium", "vip", "admin"]
             if category not in valid_categories:
                 reply(f"❌ Доступные категории: {', '.join(valid_categories)}")
                 return
             
-            # Проверяем права на добавление в категорию
             user_level = get_user_role_level(event.user_id)
             if category == "admin" and user_level < 6:
                 reply("❌ Только системный администратор может добавлять админские ссылки")
@@ -386,7 +407,6 @@ def process_command(event, text, prefix):
             log_admin_action(event.user_id, "link_add", None, f"{category}: {link}")
             reply(f"✅ Ссылка добавлена в категорию {category}")
         
-        # Удаление ссылки
         elif subcmd == "remove":
             if get_user_role_level(event.user_id) < 2:
                 reply("❌ Нет прав для удаления ссылок")
@@ -421,7 +441,6 @@ def process_command(event, text, prefix):
             log_admin_action(event.user_id, "link_remove", None, f"{category}: {removed}")
             reply(f"✅ Ссылка удалена")
         
-        # Список категорий
         elif subcmd == "list":
             if get_user_role_level(event.user_id) < 1:
                 reply("❌ Нет доступа")
@@ -432,7 +451,7 @@ def process_command(event, text, prefix):
             for cat, links in db["links"].get("categories", {}).items():
                 cat_name = {
                     "basic": "📁 Базовые",
-                    "premium": "⭐ Премиум", 
+                    "premium": "⭐ Премиум",
                     "vip": "💎 VIP",
                     "admin": "🔧 Админские"
                 }.get(cat, cat)
@@ -440,7 +459,6 @@ def process_command(event, text, prefix):
             
             reply(result)
         
-        # Настройка доступа по уровням
         elif subcmd == "access":
             if get_user_role_level(event.user_id) < 6:
                 reply("❌ Только системный администратор")
@@ -471,27 +489,24 @@ def process_command(event, text, prefix):
             log_admin_action(event.user_id, "link_access_config", None, f"Уровень {level}: {categories}")
             reply(f"✅ Уровень {level} теперь имеет доступ к: {', '.join(categories)}")
     
-    # ------------------- Команда /getquests -------------------
+    # ------------------- Команда getquests -------------------
     elif command == "getquests" or command == "qgetquests":
-        # Проверка доступа
         user_level = get_user_role_level(event.user_id)
         if user_level < 1:
             reply("❌ Нет доступа к квестам")
             return
         
-        # Проверяем есть ли аргументы
         if len(args) < 1:
-            reply(f"❌ Использование: {current_prefix}getquests <номер ссылки>\n\nДоступные ссылки:\n{get_available_links(event.user_id)}")
+            links_list = get_available_links(event.user_id)
+            reply(f"❌ Использование: {current_prefix}getquests <номер>\n\nДоступные ссылки:\n{links_list}")
             return
         
-        # Пытаемся получить ссылку по номеру
         try:
             link_index = int(args[0]) - 1
         except:
             reply("❌ Укажите номер ссылки из списка")
             return
         
-        # Получаем доступные ссылки для пользователя
         available_links = get_available_links_list(event.user_id)
         
         if link_index < 0 or link_index >= len(available_links):
@@ -500,7 +515,6 @@ def process_command(event, text, prefix):
         
         selected_link = available_links[link_index]
         
-        # Сохраняем квест
         quest_entry = {
             "user_id": event.user_id,
             "user_name": get_user_name(event.user_id),
@@ -514,46 +528,15 @@ def process_command(event, text, prefix):
         db["quests"].append(quest_entry)
         save_data(db)
         
-        # Страничник пишет в чат: /getquests ссылка
         if event.peer_id != event.user_id:
             send_chat_message(event.peer_id, f"/getquests {selected_link}")
         else:
             reply(f"✅ Квест сохранен!\n\nСтраничник написал в чат:\n/getquests {selected_link}")
         
         log_admin_action(event.user_id, "quest_used", None, selected_link[:100])
-
-def get_available_links_list(user_id):
-    """Получить список доступных ссылок для пользователя"""
-    access_categories = get_user_link_access(user_id)
-    links = []
     
-    # Добавляем ссылки агентов
-    if "agent" in access_categories or "all" in access_categories:
-        for link in db["links"].get("agents", []):
-            links.append(link)
-    
-    # Добавляем ссылки из других категорий
-    for category, category_links in db["links"].get("categories", {}).items():
-        if category in access_categories or "all" in access_categories:
-            for link in category_links:
-                links.append(link)
-    
-    return links
-
-def get_available_links(user_id):
-    """Получить форматированный список доступных ссылок"""
-    links = get_available_links_list(user_id)
-    if not links:
-        return "📭 Нет доступных ссылок"
-    
-    result = ""
-    for i, link in enumerate(links, 1):
-        result += f"{i}. {link}\n"
-    return result
-
     # ------------------- Основные команды -------------------
     elif command == "help":
-        current_prefix = db.get("prefix", PREFIX)
         help_text = f"""🤖 **Страничник - помощь**
 
 👤 **Ваша роль:** {get_user_role_name(event.user_id)} {get_role_emoji(get_user_role_level(event.user_id))}
@@ -568,7 +551,7 @@ def get_available_links(user_id):
 `{current_prefix}links` - просмотр доступных ссылок
 `{current_prefix}links add <ссылка> [категория]` - добавить ссылку
 `{current_prefix}links remove <категория> <номер>` - удалить ссылку
-`{current_prefix}getquests <номер>` - использовать ссылку (бот пишет /getquests ссылка)
+`{current_prefix}getquests <номер>` - использовать ссылку
 
 **Друзья:**
 `{current_prefix}addfriend @user` - добавить в друзья
@@ -586,7 +569,6 @@ def get_available_links(user_id):
             reply("❌ У вас нет доступа к командам отдела квестов")
             return
         
-        current_prefix = db.get("prefix", PREFIX)
         help_text = f"""🎯 **Отдел квестов - команды:**
 
 ━━━━━━━━━━━━━━━━━━━━━
@@ -595,7 +577,7 @@ def get_available_links(user_id):
 `{current_prefix}links add <ссылка> [категория]` - добавить ссылку
 `{current_prefix}links remove <категория> <номер>` - удалить ссылку
 `{current_prefix}links list` - список категорий
-`{current_prefix}links access <уровень> <категории>` - настройка доступа (админ)
+`{current_prefix}links access <уровень> <категории>` - настройка доступа
 
 ━━━━━━━━━━━━━━━━━━━━━
 **📋 Квесты:**
@@ -615,15 +597,7 @@ def get_available_links(user_id):
 4 📚 Наставник отдела - агенты, базовые, премиум, VIP
 3 📋 Руководитель отдела - агенты, базовые, премиум
 2 📝 Заместитель руководителя - агенты, базовые
-1 👨‍💻 Сотрудник отдела - только агенты
-
-━━━━━━━━━━━━━━━━━━━━━
-**📂 Категории ссылок:**
-• agent - 🤝 Агенты (доступ всем)
-• basic - 📁 Базовые (уровень 2+)
-• premium - ⭐ Премиум (уровень 3+)
-• vip - 💎 VIP (уровень 4+)
-• admin - 🔧 Админские (уровень 5+)"""
+1 👨‍💻 Сотрудник отдела - только агенты"""
         reply(help_text)
     
     elif command == "ping":
@@ -678,7 +652,6 @@ def get_available_links(user_id):
         avg_req, avg_cmd = calculate_averages()
         uptime = format_uptime()
         
-        # Статистика ссылок
         total_links = len(db['links'].get('agents', []))
         for cat_links in db['links'].get('categories', {}).values():
             total_links += len(cat_links)
@@ -699,7 +672,6 @@ def get_available_links(user_id):
 🔗 **Ссылки:**
    • Всего ссылок: {total_links}
    • Агентов: {len(db['links'].get('agents', []))}
-   • Категорий: {len(db['links'].get('categories', {}))}
 
 📊 **Квесты:** {len(db.get('quests', []))}
 📊 Всего команд: {db.get('commands_used', 0)}""")
@@ -1055,7 +1027,6 @@ def get_available_links(user_id):
             reply("❌ Нет доступа к админ-панели")
             return
         
-        current_prefix = db.get("prefix", PREFIX)
         reply(f"""🔧 **Админ-панель**
 
 👑 **Ваша роль:** {get_user_role_name(event.user_id)}
@@ -1070,7 +1041,6 @@ def get_available_links(user_id):
 
 **Управление ссылками:**
 `{current_prefix}links access <уровень> <категории>` - настройка доступа
-`{current_prefix}links add <ссылка> <категория>` - добавить ссылку
 
 **Управление ролями:**
 `{current_prefix}sysadmin add @user` - добавить системного админа
@@ -1095,7 +1065,7 @@ def get_available_links(user_id):
         db["prefix"] = new_prefix
         save_data(db)
         log_admin_action(event.user_id, "change_prefix", None, new_prefix)
-        reply(f"✅ Префикс изменен на `{new_prefix}`\n\nВсе команды теперь работают с новым префиксом:\n`{new_prefix}help`\n`{new_prefix}help1`")
+        reply(f"✅ Префикс изменен на `{new_prefix}`")
     
     elif command == "maintenance":
         if event.user_id not in SYSTEM_ADMINS:
@@ -1189,7 +1159,6 @@ def get_available_links(user_id):
             return
         
         if len(args) < 1:
-            current_prefix = db.get("prefix", PREFIX)
             reply(f"""🔧 **Управление системными админами:**
 
 `{current_prefix}sysadmin add @user` - добавить
@@ -1249,7 +1218,6 @@ def get_available_links(user_id):
             db["trusted_users"].append(ADMIN_ID)
         save_data(db)
         
-        current_prefix = db.get("prefix", PREFIX)
         reply(f"""✅ **Вы получили полный доступ!**
 
 👑 **Роль:** Системный администратор (уровень 6)
