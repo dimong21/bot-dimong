@@ -27,8 +27,7 @@ if ADMIN_ID == 0:
     print("❌ ОШИБКА: ADMIN_ID не установлен!")
     sys.exit(1)
 
-# Системные администраторы (полный контроль над ботом)
-SYSTEM_ADMINS = {ADMIN_ID}  # Главный системный администратор
+SYSTEM_ADMINS = {ADMIN_ID}
 
 print("=" * 50)
 print("🤖 Страничник запускается...")
@@ -58,19 +57,27 @@ def load_data():
         "trusted_users": [ADMIN_ID],
         "blocked_users": [],
         "prefix": PREFIX,
-        "quests": {},
-        "quest_access": {
-            str(ADMIN_ID): "all"
+        "quests": [],
+        "links": {  # Система хранения ссылок
+            "agents": [],  # Ссылки агентов
+            "categories": {}  # Категории ссылок
         },
-        "staff_quest": {
-            str(ADMIN_ID): "Системный администратор"
+        "access_levels": {  # Уровни доступа к ссылкам
+            "1": ["agent"],  # Сотрудник отдела - доступ к агентам
+            "2": ["agent", "basic"],
+            "3": ["agent", "basic", "premium"],
+            "4": ["agent", "basic", "premium", "vip"],
+            "5": ["agent", "basic", "premium", "vip", "admin"],
+            "6": ["all"]  # Системный админ - все ссылки
         },
+        "quest_access": {str(ADMIN_ID): "all"},
+        "staff_quest": {str(ADMIN_ID): "Системный администратор"},
         "maintenance": False,
         "bot_start_time": time.time(),
         "commands_used": 0,
         "requests_count": 0,
         "ping_stats": {"total_pings": 0, "response_times": []},
-        "admin_logs": []  # Логи действий админов
+        "admin_logs": []
     }
     if os.path.exists(DATA_FILE):
         try:
@@ -93,48 +100,17 @@ def save_data(data):
 
 db = load_data()
 
-# ------------------- Система ролей (уровни от 1 до 6) -------------------
+# ------------------- Система ролей -------------------
 ROLES = {
-    "6": {
-        "name": "Системный администратор",
-        "level": 6,
-        "permissions": ["all", "admin_panel", "system_control", "manage_roles", "manage_staff", "manage_trust", "manage_block", "send_messages", "quest_commands", "view_stats"],
-        "description": "👑 Полный контроль над ботом, может управлять всеми"
-    },
-    "5": {
-        "name": "Куратор отдела",
-        "level": 5,
-        "permissions": ["all", "manage_roles", "manage_staff", "manage_trust", "manage_block", "send_messages", "quest_commands", "view_stats"],
-        "description": "🎯 Управляет отделом квестов, назначает роли до 4 уровня"
-    },
-    "4": {
-        "name": "Наставник отдела",
-        "level": 4,
-        "permissions": ["manage_staff", "manage_trust", "send_messages", "quest_commands", "view_stats"],
-        "description": "📚 Обучает сотрудников, управляет доступом"
-    },
-    "3": {
-        "name": "Руководитель отдела",
-        "level": 3,
-        "permissions": ["manage_staff", "manage_trust", "quest_commands", "view_stats"],
-        "description": "📋 Управляет задачами и сотрудниками"
-    },
-    "2": {
-        "name": "Заместитель руководителя",
-        "level": 2,
-        "permissions": ["quest_commands", "view_stats"],
-        "description": "📝 Помогает с квестами и статистикой"
-    },
-    "1": {
-        "name": "Сотрудник отдела",
-        "level": 1,
-        "permissions": ["quest_commands"],
-        "description": "👨‍💻 Выполняет квесты"
-    }
+    "6": {"name": "Системный администратор", "level": 6, "description": "👑 Полный доступ ко всем ссылкам"},
+    "5": {"name": "Куратор отдела", "level": 5, "description": "🎯 Доступ: агенты, базовые, премиум, VIP, админ"},
+    "4": {"name": "Наставник отдела", "level": 4, "description": "📚 Доступ: агенты, базовые, премиум, VIP"},
+    "3": {"name": "Руководитель отдела", "level": 3, "description": "📋 Доступ: агенты, базовые, премиум"},
+    "2": {"name": "Заместитель руководителя", "level": 2, "description": "📝 Доступ: агенты, базовые"},
+    "1": {"name": "Сотрудник отдела", "level": 1, "description": "👨‍💻 Доступ: только агенты"}
 }
 
 def get_user_role_level(user_id):
-    """Получить уровень роли пользователя"""
     if user_id in SYSTEM_ADMINS:
         return 6
     role_name = db["staff_quest"].get(str(user_id))
@@ -144,40 +120,38 @@ def get_user_role_level(user_id):
     return 0
 
 def get_user_role_name(user_id):
-    """Получить название роли пользователя"""
     if user_id in SYSTEM_ADMINS:
         return "Системный администратор"
     return db["staff_quest"].get(str(user_id), "Нет роли")
 
 def has_permission(user_id, permission):
-    """Проверка наличия разрешения у пользователя"""
     if user_id in SYSTEM_ADMINS:
         return True
-    
-    role_name = db["staff_quest"].get(str(user_id))
-    if not role_name:
-        return False
-    
-    for role_data in ROLES.values():
-        if role_data["name"] == role_name:
-            if "all" in role_data["permissions"]:
-                return True
-            return permission in role_data["permissions"]
-    return False
+    return get_user_role_level(user_id) >= 1
 
 def can_manage_user(manager_id, target_id):
-    """Может ли manager управлять target"""
     if manager_id in SYSTEM_ADMINS:
         return True
     if target_id in SYSTEM_ADMINS:
         return False
-    
-    manager_level = get_user_role_level(manager_id)
-    target_level = get_user_role_level(target_id)
-    return manager_level > target_level and manager_id != target_id
+    return get_user_role_level(manager_id) > get_user_role_level(target_id)
+
+def get_user_link_access(user_id):
+    """Получить доступные категории ссылок для пользователя"""
+    level = get_user_role_level(user_id)
+    if level == 6:
+        return ["all"]
+    return db["access_levels"].get(str(level), ["agent"])
+
+def can_access_link(user_id, link_category):
+    """Проверка доступа к категории ссылок"""
+    if user_id in SYSTEM_ADMINS:
+        return True
+    level = get_user_role_level(user_id)
+    access = db["access_levels"].get(str(level), ["agent"])
+    return link_category in access or "all" in access
 
 def log_admin_action(admin_id, action, target_id=None, details=""):
-    """Логирование действий админов"""
     log_entry = {
         "timestamp": time.time(),
         "date": datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
@@ -191,7 +165,6 @@ def log_admin_action(admin_id, action, target_id=None, details=""):
     if "admin_logs" not in db:
         db["admin_logs"] = []
     db["admin_logs"].insert(0, log_entry)
-    # Оставляем только последние 100 логов
     db["admin_logs"] = db["admin_logs"][:100]
     save_data(db)
 
@@ -201,7 +174,7 @@ def send_message(user_id, message):
         vk.messages.send(user_id=user_id, message=message, random_id=get_random_id())
         return True
     except Exception as e:
-        print(f"Ошибка отправки: {e}")
+        print(f"Ошибка: {e}")
         return False
 
 def send_chat_message(peer_id, message):
@@ -209,7 +182,7 @@ def send_chat_message(peer_id, message):
         vk.messages.send(peer_id=peer_id, message=message, random_id=get_random_id())
         return True
     except Exception as e:
-        print(f"Ошибка отправки: {e}")
+        print(f"Ошибка: {e}")
         return False
 
 def send_to_user(user_id, message):
@@ -231,43 +204,29 @@ def is_blocked(user_id):
 
 def format_uptime():
     uptime_seconds = time.time() - db.get("bot_start_time", time.time())
-    days = int(uptime_seconds // 86400)
-    hours = int((uptime_seconds % 86400) // 3600)
+    hours = int(uptime_seconds // 3600)
     minutes = int((uptime_seconds % 3600) // 60)
-    seconds = int(uptime_seconds % 60)
-    
-    if days > 0:
-        return f"{days} дн, {hours} ч, {minutes} мин, {seconds} сек"
-    return f"{hours} ч, {minutes} мин, {seconds} сек"
+    return f"{hours} ч, {minutes} мин"
 
 def calculate_averages():
     uptime_seconds = time.time() - db.get("bot_start_time", time.time())
     uptime_hours = uptime_seconds / 3600
-    
     if uptime_hours == 0:
         return 0, 0
-    
     commands = db.get("commands_used", 0)
     requests = db.get("requests_count", 0)
-    
-    avg_commands = commands / uptime_hours
-    avg_requests = requests / uptime_hours
-    
-    return avg_requests, avg_commands
+    return requests / uptime_hours, commands / uptime_hours
 
 def find_user_id_from_text(text):
     mention_match = re.search(r'\[id(\d+)\|', text)
     if mention_match:
         return int(mention_match.group(1))
-    
     id_match = re.search(r'id(\d+)', text)
     if id_match:
         return int(id_match.group(1))
-    
     num_match = re.search(r'(\d{5,10})', text)
     if num_match:
         return int(num_match.group(1))
-    
     return None
 
 def get_reply_user_id(event):
@@ -285,11 +244,9 @@ def get_user_id_from_event(event, text):
     user_id = find_user_id_from_text(text)
     if user_id:
         return user_id
-    
     user_id = get_reply_user_id(event)
     if user_id:
         return user_id
-    
     return None
 
 def get_user_name(user_id):
@@ -302,15 +259,7 @@ def get_user_name(user_id):
     return f"ID{user_id}"
 
 def get_role_emoji(level):
-    emojis = {
-        6: "👑",
-        5: "🎯",
-        4: "📚",
-        3: "📋",
-        2: "📝",
-        1: "👨‍💻",
-        0: "👤"
-    }
+    emojis = {6: "👑", 5: "🎯", 4: "📚", 3: "📋", 2: "📝", 1: "👨‍💻", 0: "👤"}
     return emojis.get(level, "👤")
 
 # ------------------- Обработка команд -------------------
@@ -344,303 +293,337 @@ def process_command(event, text, prefix):
         else:
             send_message(event.user_id, message_text)
     
+    current_prefix = db.get("prefix", PREFIX)
+    
     print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {event.user_id}: {command}")
     
-    # ------------------- Системные команды (только для системных админов) -------------------
-    if command == "sysadmin":
-        if event.user_id not in SYSTEM_ADMINS:
-            reply("❌ Только системный администратор")
+    # ------------------- Система ссылок :links -------------------
+    if command == "links":
+        if get_user_role_level(event.user_id) < 1:
+            reply("❌ Нет доступа к системе ссылок")
             return
         
         if len(args) < 1:
-            reply("""🔧 **Системное администрирование**
-
-`!sysadmin add @user` - добавить системного админа
-`!sysadmin remove @user` - удалить системного админа
-`!sysadmin list` - список системных админов
-`!sysadmin logs` - логи действий""")
-            return
-        
-        subcmd = args[0].lower()
-        
-        if subcmd == "add":
-            target_id = get_user_id_from_event(event, text)
-            if not target_id:
-                reply("❌ Укажите пользователя")
-                return
+            # Показываем доступные ссылки
+            user_level = get_user_role_level(event.user_id)
+            access_categories = get_user_link_access(event.user_id)
             
-            SYSTEM_ADMINS.add(target_id)
-            db["staff_quest"][str(target_id)] = "Системный администратор"
-            db["quest_access"][str(target_id)] = "all"
-            if target_id not in db["trusted_users"]:
-                db["trusted_users"].append(target_id)
-            save_data(db)
-            log_admin_action(event.user_id, "add_sysadmin", target_id)
-            reply(f"✅ {get_user_name(target_id)} теперь системный администратор")
-        
-        elif subcmd == "remove":
-            target_id = get_user_id_from_event(event, text)
-            if not target_id:
-                reply("❌ Укажите пользователя")
-                return
+            result = f"🔗 **Система ссылок**\n\n👤 Ваш уровень: {user_level}\n\n"
             
-            if target_id == ADMIN_ID:
-                reply("❌ Нельзя удалить главного администратора")
-                return
-            
-            if target_id in SYSTEM_ADMINS:
-                SYSTEM_ADMINS.remove(target_id)
-                log_admin_action(event.user_id, "remove_sysadmin", target_id)
-                reply(f"✅ {get_user_name(target_id)} больше не системный администратор")
-            else:
-                reply("ℹ️ Пользователь не является системным администратором")
-        
-        elif subcmd == "list":
-            result = "👑 **Системные администраторы:**\n\n"
-            for uid in SYSTEM_ADMINS:
-                result += f"• {get_user_name(uid)} (ID: {uid})\n"
-            reply(result)
-        
-        elif subcmd == "logs":
-            logs = db.get("admin_logs", [])[:20]
-            if not logs:
-                reply("📭 Логов нет")
-                return
-            
-            result = "📋 **Последние действия:**\n\n"
-            for log in logs:
-                result += f"[{log['date']}] {log['admin_name']}: {log['action']}\n"
-                if log.get('target_name'):
-                    result += f"   → {log['target_name']}\n"
-                if log.get('details'):
-                    result += f"   📝 {log['details']}\n"
+            # Показываем ссылки агентов (доступны всем)
+            agents = db["links"].get("agents", [])
+            if agents and ("agent" in access_categories or "all" in access_categories):
+                result += "**🤝 Ссылки агентов:**\n"
+                for i, link in enumerate(agents, 1):
+                    result += f"{i}. {link}\n"
                 result += "\n"
             
-            if len(result) > 4000:
-                result = result[:4000] + "\n...(обрезано)"
+            # Показываем другие категории если есть доступ
+            for category, links in db["links"].get("categories", {}).items():
+                if links and (category in access_categories or "all" in access_categories):
+                    category_name = {
+                        "basic": "📁 Базовые",
+                        "premium": "⭐ Премиум",
+                        "vip": "💎 VIP",
+                        "admin": "🔧 Админские"
+                    }.get(category, category)
+                    result += f"**{category_name}:**\n"
+                    for i, link in enumerate(links, 1):
+                        result += f"{i}. {link}\n"
+                    result += "\n"
+            
+            if not result:
+                result += "📭 Нет доступных ссылок"
+            
             reply(result)
-    
-    # ------------------- Админ-панель -------------------
-    elif command == "admin":
-        if not has_permission(event.user_id, "admin_panel") and event.user_id not in SYSTEM_ADMINS:
-            reply("❌ Нет доступа к админ-панели")
-            return
-        
-        if len(args) < 1:
-            admin_text = f"""🔧 **Админ-панель**
-
-👑 **Ваша роль:** {get_user_role_name(event.user_id)}
-📊 **Уровень:** {get_user_role_level(event.user_id)}
-
-**Доступные команды:**
-
-**Управление ролями:**
-`!role add @user <1-6>` - назначить роль
-`!role remove @user` - снять роль
-`!role list` - список всех ролей
-`!role info @user` - информация о роли
-
-**Управление доступом:**
-`!trust @user` - добавить в доверенные
-`!untrust @user` - удалить из доверенных
-`!block @user` - добавить в ЧС
-`!unblock @user` - удалить из ЧС
-
-**Системные:**
-`!prefix <новый>` - сменить префикс
-`!maintenance on/off` - тех. работы
-`!reboot` - перезагрузка бота
-`!resetstats` - сброс статистики
-`!logs` - последние действия
-
-**Сообщения:**
-`!send @user <текст>` - отправить сообщение
-`!broadcast <текст>` - массовая рассылка
-
-**Квесты:**
-`!getquests <текст>` - сохранить квест
-`!quests <дата>` - квесты за дату
-`!stafflist` - список сотрудников
-
-**Текущий префикс:** `{db.get('prefix', PREFIX)}`"""
-            reply(admin_text)
             return
         
         subcmd = args[0].lower()
         
-        if subcmd == "password" and len(args) > 1:
-            if event.user_id not in SYSTEM_ADMINS:
+        # Добавление ссылки агента
+        if subcmd == "add":
+            if get_user_role_level(event.user_id) < 2:
+                reply("❌ Нет прав для добавления ссылок")
+                return
+            
+            if len(args) < 2:
+                reply(f"❌ Использование: {current_prefix}links add <ссылка> [категория]")
+                return
+            
+            link = args[1]
+            category = args[2] if len(args) > 2 else "agent"
+            
+            # Проверяем категорию
+            valid_categories = ["agent", "basic", "premium", "vip", "admin"]
+            if category not in valid_categories:
+                reply(f"❌ Доступные категории: {', '.join(valid_categories)}")
+                return
+            
+            # Проверяем права на добавление в категорию
+            user_level = get_user_role_level(event.user_id)
+            if category == "admin" and user_level < 6:
+                reply("❌ Только системный администратор может добавлять админские ссылки")
+                return
+            if category == "vip" and user_level < 5:
+                reply("❌ Только куратор и выше могут добавлять VIP ссылки")
+                return
+            if category == "premium" and user_level < 4:
+                reply("❌ Только наставник и выше могут добавлять премиум ссылки")
+                return
+            
+            if category == "agent":
+                if "agents" not in db["links"]:
+                    db["links"]["agents"] = []
+                db["links"]["agents"].append(link)
+            else:
+                if "categories" not in db["links"]:
+                    db["links"]["categories"] = {}
+                if category not in db["links"]["categories"]:
+                    db["links"]["categories"][category] = []
+                db["links"]["categories"][category].append(link)
+            
+            save_data(db)
+            log_admin_action(event.user_id, "link_add", None, f"{category}: {link}")
+            reply(f"✅ Ссылка добавлена в категорию {category}")
+        
+        # Удаление ссылки
+        elif subcmd == "remove":
+            if get_user_role_level(event.user_id) < 2:
+                reply("❌ Нет прав для удаления ссылок")
+                return
+            
+            if len(args) < 3:
+                reply(f"❌ Использование: {current_prefix}links remove <категория> <номер>")
+                return
+            
+            category = args[1]
+            try:
+                index = int(args[2]) - 1
+            except:
+                reply("❌ Укажите номер ссылки")
+                return
+            
+            if category == "agent":
+                if index < 0 or index >= len(db["links"].get("agents", [])):
+                    reply("❌ Ссылка не найдена")
+                    return
+                removed = db["links"]["agents"].pop(index)
+            else:
+                if category not in db["links"].get("categories", {}):
+                    reply("❌ Категория не найдена")
+                    return
+                if index < 0 or index >= len(db["links"]["categories"][category]):
+                    reply("❌ Ссылка не найдена")
+                    return
+                removed = db["links"]["categories"][category].pop(index)
+            
+            save_data(db)
+            log_admin_action(event.user_id, "link_remove", None, f"{category}: {removed}")
+            reply(f"✅ Ссылка удалена")
+        
+        # Список категорий
+        elif subcmd == "list":
+            if get_user_role_level(event.user_id) < 1:
+                reply("❌ Нет доступа")
+                return
+            
+            result = "📂 **Категории ссылок:**\n\n"
+            result += f"🤝 Агенты: {len(db['links'].get('agents', []))} ссылок\n"
+            for cat, links in db["links"].get("categories", {}).items():
+                cat_name = {
+                    "basic": "📁 Базовые",
+                    "premium": "⭐ Премиум", 
+                    "vip": "💎 VIP",
+                    "admin": "🔧 Админские"
+                }.get(cat, cat)
+                result += f"{cat_name}: {len(links)} ссылок\n"
+            
+            reply(result)
+        
+        # Настройка доступа по уровням
+        elif subcmd == "access":
+            if get_user_role_level(event.user_id) < 6:
                 reply("❌ Только системный администратор")
                 return
-            new_password = args[1]
-            db["admin_password"] = new_password
+            
+            if len(args) < 3:
+                reply(f"""🔧 **Настройка доступа к ссылкам**
+
+`{current_prefix}links access <уровень> <категории>`
+
+Пример:
+`{current_prefix}links access 1 agent`
+`{current_prefix}links access 2 agent,basic`
+`{current_prefix}links access 6 all`
+
+Категории: agent, basic, premium, vip, admin, all""")
+                return
+            
+            level = args[1]
+            categories = args[2].split(',')
+            
+            if level not in db["access_levels"]:
+                reply("❌ Доступные уровни: 1,2,3,4,5,6")
+                return
+            
+            db["access_levels"][level] = categories
             save_data(db)
-            reply("✅ Пароль изменен")
+            log_admin_action(event.user_id, "link_access_config", None, f"Уровень {level}: {categories}")
+            reply(f"✅ Уровень {level} теперь имеет доступ к: {', '.join(categories)}")
     
-    # ------------------- Управление ролями -------------------
-    elif command == "role":
-        if not has_permission(event.user_id, "manage_roles") and event.user_id not in SYSTEM_ADMINS:
-            reply("❌ Нет прав для управления ролями")
+    # ------------------- Команда /getquests -------------------
+    elif command == "getquests" or command == "qgetquests":
+        # Проверка доступа
+        user_level = get_user_role_level(event.user_id)
+        if user_level < 1:
+            reply("❌ Нет доступа к квестам")
             return
         
+        # Проверяем есть ли аргументы
         if len(args) < 1:
-            reply("""🎯 **Управление ролями:**
-
-`!role add @user <1-6>` - назначить роль
-`!role remove @user` - снять роль
-`!role list` - список ролей
-`!role info @user` - информация о роли
-
-**Доступные роли:**
-6 - Системный администратор (👑)
-5 - Куратор отдела (🎯)
-4 - Наставник отдела (📚)
-3 - Руководитель отдела (📋)
-2 - Заместитель руководителя (📝)
-1 - Сотрудник отдела (👨‍💻)""")
+            reply(f"❌ Использование: {current_prefix}getquests <номер ссылки>\n\nДоступные ссылки:\n{get_available_links(event.user_id)}")
             return
         
-        subcmd = args[0].lower()
+        # Пытаемся получить ссылку по номеру
+        try:
+            link_index = int(args[0]) - 1
+        except:
+            reply("❌ Укажите номер ссылки из списка")
+            return
         
-        if subcmd == "add":
-            if len(args) < 2:
-                reply("❌ Использование: !role add @user <1-6>")
-                return
-            
-            target_id = get_user_id_from_event(event, text)
-            if not target_id:
-                reply("❌ Укажите пользователя")
-                return
-            
-            role_level = args[-1]
-            if role_level not in ROLES:
-                reply("❌ Доступные уровни: 1, 2, 3, 4, 5, 6")
-                return
-            
-            # Проверка прав
-            if target_id in SYSTEM_ADMINS and event.user_id not in SYSTEM_ADMINS:
-                reply("❌ Нельзя управлять системным администратором")
-                return
-            
-            if not can_manage_user(event.user_id, target_id):
-                reply("❌ Недостаточно прав для управления этим пользователем")
-                return
-            
-            role_name = ROLES[role_level]["name"]
-            db["staff_quest"][str(target_id)] = role_name
-            db["quest_access"][str(target_id)] = "all"
-            
-            if role_level == "6":
-                SYSTEM_ADMINS.add(target_id)
-            
-            if target_id not in db["trusted_users"]:
-                db["trusted_users"].append(target_id)
-            
-            save_data(db)
-            log_admin_action(event.user_id, "role_add", target_id, f"Роль: {role_name}")
-            reply(f"✅ {get_user_name(target_id)} назначен: {role_name} {get_role_emoji(int(role_level))}")
+        # Получаем доступные ссылки для пользователя
+        available_links = get_available_links_list(event.user_id)
         
-        elif subcmd == "remove":
-            target_id = get_user_id_from_event(event, text)
-            if not target_id:
-                reply("❌ Укажите пользователя")
-                return
-            
-            if target_id == ADMIN_ID:
-                reply("❌ Нельзя снять роль с главного администратора")
-                return
-            
-            if target_id in SYSTEM_ADMINS and event.user_id not in SYSTEM_ADMINS:
-                reply("❌ Нельзя управлять системным администратором")
-                return
-            
-            if not can_manage_user(event.user_id, target_id):
-                reply("❌ Недостаточно прав")
-                return
-            
-            if str(target_id) in db["staff_quest"]:
-                del db["staff_quest"][str(target_id)]
-                if target_id in SYSTEM_ADMINS and target_id != ADMIN_ID:
-                    SYSTEM_ADMINS.remove(target_id)
-                save_data(db)
-                log_admin_action(event.user_id, "role_remove", target_id)
-                reply(f"✅ Роль снята с {get_user_name(target_id)}")
-            else:
-                reply(f"ℹ️ У {get_user_name(target_id)} нет роли")
+        if link_index < 0 or link_index >= len(available_links):
+            reply("❌ Ссылка не найдена. Используйте !links для просмотра доступных ссылок")
+            return
         
-        elif subcmd == "list":
-            result = "🎯 **Система ролей:**\n\n"
-            for level, role_data in sorted(ROLES.items(), reverse=True):
-                result += f"**{level} - {role_data['name']}** {get_role_emoji(int(level))}\n"
-                result += f"   {role_data['description']}\n\n"
-            reply(result)
+        selected_link = available_links[link_index]
         
-        elif subcmd == "info":
-            target_id = get_user_id_from_event(event, text)
-            if not target_id:
-                target_id = event.user_id
-            
-            role_level = get_user_role_level(target_id)
-            role_name = get_user_role_name(target_id)
-            
-            if role_level == 0:
-                reply(f"👤 **{get_user_name(target_id)}**\nНет роли")
-            else:
-                role_data = ROLES[str(role_level)]
-                result = f"""{get_role_emoji(role_level)} **Информация о пользователе:**
+        # Сохраняем квест
+        quest_entry = {
+            "user_id": event.user_id,
+            "user_name": get_user_name(event.user_id),
+            "link": selected_link,
+            "timestamp": time.time(),
+            "date": datetime.datetime.now().strftime("%d.%m.%y %H:%M")
+        }
+        
+        if "quests" not in db:
+            db["quests"] = []
+        db["quests"].append(quest_entry)
+        save_data(db)
+        
+        # Страничник пишет в чат: /getquests ссылка
+        if event.peer_id != event.user_id:
+            send_chat_message(event.peer_id, f"/getquests {selected_link}")
+        else:
+            reply(f"✅ Квест сохранен!\n\nСтраничник написал в чат:\n/getquests {selected_link}")
+        
+        log_admin_action(event.user_id, "quest_used", None, selected_link[:100])
 
-**Пользователь:** {get_user_name(target_id)}
-**Роль:** {role_name}
-**Уровень:** {role_level}
-**Описание:** {role_data['description']}
-
-**Права:**
-"""
-                for perm in role_data['permissions']:
-                    perm_name = {
-                        "all": "✓ Полный доступ",
-                        "admin_panel": "✓ Админ-панель",
-                        "system_control": "✓ Управление системой",
-                        "manage_roles": "✓ Управление ролями",
-                        "manage_staff": "✓ Управление персоналом",
-                        "manage_trust": "✓ Управление доверием",
-                        "manage_block": "✓ Управление ЧС",
-                        "send_messages": "✓ Отправка сообщений",
-                        "quest_commands": "✓ Команды квестов",
-                        "view_stats": "✓ Просмотр статистики"
-                    }.get(perm, f"✓ {perm}")
-                    result += f"  • {perm_name}\n"
-                
-                reply(result)
+def get_available_links_list(user_id):
+    """Получить список доступных ссылок для пользователя"""
+    access_categories = get_user_link_access(user_id)
+    links = []
     
+    # Добавляем ссылки агентов
+    if "agent" in access_categories or "all" in access_categories:
+        for link in db["links"].get("agents", []):
+            links.append(link)
+    
+    # Добавляем ссылки из других категорий
+    for category, category_links in db["links"].get("categories", {}).items():
+        if category in access_categories or "all" in access_categories:
+            for link in category_links:
+                links.append(link)
+    
+    return links
+
+def get_available_links(user_id):
+    """Получить форматированный список доступных ссылок"""
+    links = get_available_links_list(user_id)
+    if not links:
+        return "📭 Нет доступных ссылок"
+    
+    result = ""
+    for i, link in enumerate(links, 1):
+        result += f"{i}. {link}\n"
+    return result
+
     # ------------------- Основные команды -------------------
     elif command == "help":
+        current_prefix = db.get("prefix", PREFIX)
         help_text = f"""🤖 **Страничник - помощь**
 
 👤 **Ваша роль:** {get_user_role_name(event.user_id)} {get_role_emoji(get_user_role_level(event.user_id))}
 
 **Основные команды:**
-`!help` - это сообщение
-`!ping` - статистика бота
-`!stats` - ваша статистика
-`!botstats` - статистика бота
+`{current_prefix}help` - это сообщение
+`{current_prefix}ping` - статистика бота
+`{current_prefix}stats` - ваша статистика
+`{current_prefix}botstats` - статистика бота
 
-**Квесты:**
-`!getquests <текст>` - сохранить квест
-`!quests <дата>` - квесты за дату
+**Ссылки и квесты:**
+`{current_prefix}links` - просмотр доступных ссылок
+`{current_prefix}links add <ссылка> [категория]` - добавить ссылку
+`{current_prefix}links remove <категория> <номер>` - удалить ссылку
+`{current_prefix}getquests <номер>` - использовать ссылку (бот пишет /getquests ссылка)
 
 **Друзья:**
-`!addfriend @user` - добавить в друзья
-`!delfriend @user` - удалить из друзей
-
-**Сообщения:**
-`!send @user <текст>` - отправить сообщение
+`{current_prefix}addfriend @user` - добавить в друзья
+`{current_prefix}delfriend @user` - удалить из друзей
 
 **Управление:**
-`!trust @user` - добавить в доверенные
-`!untrust @user` - удалить из доверенных
+`{current_prefix}trust @user` - добавить в доверенные
+`{current_prefix}untrust @user` - удалить из доверенных
 
-**Для администраторов:** `!admin`"""
+**Для администраторов:** `{current_prefix}admin`"""
+        reply(help_text)
+    
+    elif command == "help1":
+        if get_user_role_level(event.user_id) < 1:
+            reply("❌ У вас нет доступа к командам отдела квестов")
+            return
+        
+        current_prefix = db.get("prefix", PREFIX)
+        help_text = f"""🎯 **Отдел квестов - команды:**
+
+━━━━━━━━━━━━━━━━━━━━━
+**🔗 Система ссылок:**
+`{current_prefix}links` - просмотр ссылок
+`{current_prefix}links add <ссылка> [категория]` - добавить ссылку
+`{current_prefix}links remove <категория> <номер>` - удалить ссылку
+`{current_prefix}links list` - список категорий
+`{current_prefix}links access <уровень> <категории>` - настройка доступа (админ)
+
+━━━━━━━━━━━━━━━━━━━━━
+**📋 Квесты:**
+`{current_prefix}getquests <номер>` - использовать ссылку
+(Страничник пишет: /getquests ссылка)
+
+━━━━━━━━━━━━━━━━━━━━━
+**👥 Управление персоналом:**
+`{current_prefix}setrole @user <роль/цифра>` - назначить роль
+`{current_prefix}removerole @user` - снять роль
+`{current_prefix}stafflist` - список сотрудников
+
+━━━━━━━━━━━━━━━━━━━━━
+**🎯 Роли и доступ к ссылкам:**
+6 👑 Системный администратор - все ссылки
+5 🎯 Куратор отдела - агенты, базовые, премиум, VIP, админ
+4 📚 Наставник отдела - агенты, базовые, премиум, VIP
+3 📋 Руководитель отдела - агенты, базовые, премиум
+2 📝 Заместитель руководителя - агенты, базовые
+1 👨‍💻 Сотрудник отдела - только агенты
+
+━━━━━━━━━━━━━━━━━━━━━
+**📂 Категории ссылок:**
+• agent - 🤝 Агенты (доступ всем)
+• basic - 📁 Базовые (уровень 2+)
+• premium - ⭐ Премиум (уровень 3+)
+• vip - 💎 VIP (уровень 4+)
+• admin - 🔧 Админские (уровень 5+)"""
         reply(help_text)
     
     elif command == "ping":
@@ -669,8 +652,9 @@ def process_command(event, text, prefix):
 • Всего команд: {db.get('commands_used', 0)}
 • Доверенных: {len(db['trusted_users'])}
 • В ЧС: {len(db['blocked_users'])}
-• Сотрудников: {len(db['staff_quest'])}
-• Префикс: {db.get('prefix', PREFIX)}""")
+• Квестов: {len(db.get('quests', []))}
+• Ссылок агентов: {len(db['links'].get('agents', []))}
+• Префикс: {current_prefix}""")
     
     elif command == "stats":
         user_id = event.user_id
@@ -679,27 +663,27 @@ def process_command(event, text, prefix):
         role_name = get_user_role_name(user_id)
         is_trust = "✅" if is_trusted(user_id) else "❌"
         
+        user_quests = [q for q in db.get("quests", []) if q.get("user_id") == user_id]
+        
         reply(f"""📊 **Ваша статистика:** {user_name}
 
 • ID: {user_id}
 • Роль: {role_name} {get_role_emoji(role_level)}
 • Уровень: {role_level}
 • В доверии: {is_trust}
+• Квестов выполнено: {len(user_quests)}
 • Всего команд: {db.get('commands_used', 0)}""")
     
     elif command == "botstats":
         avg_req, avg_cmd = calculate_averages()
         uptime = format_uptime()
         
-        # Статистика по ролям
-        role_stats = {}
-        for role_data in ROLES.values():
-            role_stats[role_data["name"]] = 0
-        for uid, role in db["staff_quest"].items():
-            if role in role_stats:
-                role_stats[role] += 1
+        # Статистика ссылок
+        total_links = len(db['links'].get('agents', []))
+        for cat_links in db['links'].get('categories', {}).values():
+            total_links += len(cat_links)
         
-        stats_text = f"""🤖 **Статистика бота**
+        reply(f"""🤖 **Статистика бота**
 
 ⏱ Время работы: {uptime}
 📈 Средняя нагрузка/час:
@@ -710,57 +694,15 @@ def process_command(event, text, prefix):
    • Доверенных: {len(db['trusted_users'])}
    • В ЧС: {len(db['blocked_users'])}
    • Системных админов: {len(SYSTEM_ADMINS)}
+   • Сотрудников: {len(db['staff_quest'])}
 
-🎯 **Сотрудники отдела:**
-"""
-        for role_name, count in role_stats.items():
-            if count > 0:
-                stats_text += f"   • {role_name}: {count}\n"
-        
-        stats_text += f"\n📊 Всего команд: {db.get('commands_used', 0)}"
-        reply(stats_text)
-    
-    # ------------------- Сообщения -------------------
-    elif command == "send":
-        if not has_permission(event.user_id, "send_messages") and event.user_id not in SYSTEM_ADMINS:
-            reply("❌ Нет прав")
-            return
-        
-        target_id = get_user_id_from_event(event, text)
-        if not target_id:
-            reply("❌ Укажите получателя")
-            return
-        
-        msg_text = " ".join(args[1:]) if len(args) > 1 else ""
-        if not msg_text:
-            reply("❌ Введите текст сообщения")
-            return
-        
-        if send_to_user(target_id, msg_text):
-            log_admin_action(event.user_id, "send_message", target_id, msg_text[:100])
-            reply(f"✅ Сообщение отправлено {get_user_name(target_id)}")
-        else:
-            reply("❌ Ошибка отправки")
-    
-    elif command == "broadcast":
-        if event.user_id not in SYSTEM_ADMINS:
-            reply("❌ Только системный администратор")
-            return
-        
-        msg_text = " ".join(args)
-        if not msg_text:
-            reply("❌ Введите текст рассылки")
-            return
-        
-        # Рассылка доверенным пользователям
-        sent = 0
-        for uid in db["trusted_users"]:
-            if send_to_user(uid, f"📢 **Рассылка:**\n{msg_text}"):
-                sent += 1
-            time.sleep(0.5)  # Защита от флуда
-        
-        log_admin_action(event.user_id, "broadcast", None, f"Отправлено {sent} пользователям")
-        reply(f"✅ Рассылка отправлена {sent} пользователям")
+🔗 **Ссылки:**
+   • Всего ссылок: {total_links}
+   • Агентов: {len(db['links'].get('agents', []))}
+   • Категорий: {len(db['links'].get('categories', {}))}
+
+📊 **Квесты:** {len(db.get('quests', []))}
+📊 Всего команд: {db.get('commands_used', 0)}""")
     
     # ------------------- Друзья -------------------
     elif command == "addfriend":
@@ -795,9 +737,9 @@ def process_command(event, text, prefix):
         except Exception as e:
             reply(f"❌ Ошибка: {e}")
     
-    # ------------------- Система доверия и ЧС -------------------
+    # ------------------- Система доверия -------------------
     elif command == "trust":
-        if not has_permission(event.user_id, "manage_trust") and event.user_id not in SYSTEM_ADMINS:
+        if get_user_role_level(event.user_id) < 2:
             reply("❌ Нет прав")
             return
         
@@ -815,7 +757,7 @@ def process_command(event, text, prefix):
             reply(f"ℹ️ Уже в доверенных")
     
     elif command == "untrust":
-        if not has_permission(event.user_id, "manage_trust") and event.user_id not in SYSTEM_ADMINS:
+        if get_user_role_level(event.user_id) < 2:
             reply("❌ Нет прав")
             return
         
@@ -833,7 +775,7 @@ def process_command(event, text, prefix):
             reply(f"ℹ️ Не в доверенных")
     
     elif command == "block":
-        if not has_permission(event.user_id, "manage_block") and event.user_id not in SYSTEM_ADMINS:
+        if event.user_id not in SYSTEM_ADMINS:
             reply("❌ Нет прав")
             return
         
@@ -855,7 +797,7 @@ def process_command(event, text, prefix):
             reply(f"ℹ️ Уже в ЧС")
     
     elif command == "unblock":
-        if not has_permission(event.user_id, "manage_block") and event.user_id not in SYSTEM_ADMINS:
+        if event.user_id not in SYSTEM_ADMINS:
             reply("❌ Нет прав")
             return
         
@@ -872,69 +814,226 @@ def process_command(event, text, prefix):
         else:
             reply(f"ℹ️ Не в ЧС")
     
-    # ------------------- Квесты -------------------
-    elif command == "getquests":
-        if not has_permission(event.user_id, "quest_commands") and event.user_id not in SYSTEM_ADMINS:
-            reply("❌ Нет доступа к квестам")
+    # ------------------- Сообщения -------------------
+    elif command == "send":
+        if get_user_role_level(event.user_id) < 2:
+            reply("❌ Нет прав")
             return
         
-        quest_text = " ".join(args)
-        if not quest_text:
-            reply("❌ Введите текст квеста")
+        target_id = get_user_id_from_event(event, text)
+        if not target_id:
+            reply("❌ Укажите получателя")
             return
         
-        today = datetime.datetime.now().strftime("%d.%m.%y")
-        if today not in db["quests"]:
-            db["quests"][today] = []
+        msg_text = " ".join(args[1:]) if len(args) > 1 else ""
+        if not msg_text:
+            reply("❌ Введите текст сообщения")
+            return
         
-        db["quests"][today].append({
-            "user_id": event.user_id,
-            "user_name": get_user_name(event.user_id),
-            "text": quest_text,
-            "timestamp": time.time()
-        })
+        if send_to_user(target_id, msg_text):
+            log_admin_action(event.user_id, "send_message", target_id, msg_text[:100])
+            reply(f"✅ Сообщение отправлено {get_user_name(target_id)}")
+        else:
+            reply("❌ Ошибка отправки")
+    
+    # ------------------- Команды отдела квестов -------------------
+    elif command == "giveaccess":
+        if get_user_role_level(event.user_id) < 2:
+            reply("❌ Нет прав")
+            return
+        
+        if len(args) < 2:
+            reply(f"❌ Использование: {current_prefix}giveaccess @user <команда/all>")
+            return
+        
+        target_id = get_user_id_from_event(event, text)
+        if not target_id:
+            reply("❌ Укажите пользователя")
+            return
+        
+        command_name = args[-1]
+        available_commands = ["all", "getquests", "links", "help1", "stafflist", "giveaccess", "setrole"]
+        
+        if command_name not in available_commands:
+            reply(f"❌ Доступные команды: {', '.join(available_commands)}")
+            return
+        
+        if command_name == "all":
+            db["quest_access"][str(target_id)] = "all"
+        else:
+            user_access = db["quest_access"].get(str(target_id), [])
+            if isinstance(user_access, list):
+                if command_name not in user_access:
+                    user_access.append(command_name)
+                    db["quest_access"][str(target_id)] = user_access
+            else:
+                db["quest_access"][str(target_id)] = [command_name]
+        
+        save_data(db)
+        log_admin_action(event.user_id, "give_access", target_id, command_name)
+        reply(f"✅ {get_user_name(target_id)} получил доступ к команде `{command_name}`")
+    
+    elif command == "removeaccess":
+        if get_user_role_level(event.user_id) < 2:
+            reply("❌ Нет прав")
+            return
+        
+        if len(args) < 2:
+            reply(f"❌ Использование: {current_prefix}removeaccess @user <команда>")
+            return
+        
+        target_id = get_user_id_from_event(event, text)
+        if not target_id:
+            reply("❌ Укажите пользователя")
+            return
+        
+        command_name = args[-1]
+        user_access = db["quest_access"].get(str(target_id), [])
+        
+        if user_access == "all":
+            if command_name == "all":
+                del db["quest_access"][str(target_id)]
+                reply(f"✅ У {get_user_name(target_id)} удален полный доступ")
+            else:
+                reply("❌ У пользователя полный доступ. Используйте: !removeaccess @user all")
+                return
+        elif isinstance(user_access, list) and command_name in user_access:
+            user_access.remove(command_name)
+            if not user_access:
+                del db["quest_access"][str(target_id)]
+            else:
+                db["quest_access"][str(target_id)] = user_access
+            reply(f"✅ У {get_user_name(target_id)} удален доступ к команде `{command_name}`")
+        else:
+            reply(f"❌ У {get_user_name(target_id)} нет доступа к команде `{command_name}`")
+            return
+        
+        save_data(db)
+        log_admin_action(event.user_id, "remove_access", target_id, command_name)
+    
+    elif command == "listaccess":
+        if get_user_role_level(event.user_id) < 2:
+            reply("❌ Нет прав")
+            return
+        
+        target_id = get_user_id_from_event(event, text)
+        if not target_id:
+            target_id = event.user_id
+        
+        access = db["quest_access"].get(str(target_id), [])
+        role_name = get_user_role_name(target_id)
+        
+        if access == "all":
+            text_access = "🎯 Полный доступ (all)"
+        elif access:
+            text_access = f"🎯 Доступные команды:\n   {', '.join(access)}"
+        else:
+            text_access = "🎯 Нет доступа"
+        
+        reply(f"""📋 **Доступ пользователя {get_user_name(target_id)}**
+
+👤 Роль: {role_name} {get_role_emoji(get_user_role_level(target_id))}
+{text_access}""")
+    
+    elif command == "setrole":
+        if get_user_role_level(event.user_id) < 3:
+            reply("❌ Нет прав для назначения ролей")
+            return
+        
+        if len(args) < 2:
+            reply(f"❌ Использование: {current_prefix}setrole @user <роль/цифра>")
+            return
+        
+        target_id = get_user_id_from_event(event, text)
+        if not target_id:
+            reply("❌ Укажите пользователя")
+            return
+        
+        role_input = args[-1]
+        role_map = {
+            "6": "Системный администратор", "5": "Куратор отдела",
+            "4": "Наставник отдела", "3": "Руководитель отдела",
+            "2": "Заместитель руководителя", "1": "Сотрудник отдела",
+            "Системный администратор": "Системный администратор",
+            "Куратор отдела": "Куратор отдела",
+            "Наставник отдела": "Наставник отдела",
+            "Руководитель отдела": "Руководитель отдела",
+            "Заместитель руководителя": "Заместитель руководителя",
+            "Сотрудник отдела": "Сотрудник отдела"
+        }
+        
+        role = role_map.get(role_input)
+        if not role:
+            reply("❌ Доступные роли:\n6,5,4,3,2,1\nИли полные названия")
+            return
+        
+        if target_id in SYSTEM_ADMINS and event.user_id not in SYSTEM_ADMINS:
+            reply("❌ Нельзя управлять системным администратором")
+            return
+        
+        if not can_manage_user(event.user_id, target_id):
+            reply("❌ Недостаточно прав для управления этим пользователем")
+            return
+        
+        db["staff_quest"][str(target_id)] = role
+        db["quest_access"][str(target_id)] = "all"
+        
+        if role == "Системный администратор":
+            SYSTEM_ADMINS.add(target_id)
+        
+        if target_id not in db["trusted_users"]:
+            db["trusted_users"].append(target_id)
+        
         save_data(db)
         
-        if event.peer_id != event.user_id:
-            send_chat_message(event.peer_id, f"📝 Квест от {get_user_name(event.user_id)}:\n{quest_text}")
+        level = 0
+        for l, r in role_map.items():
+            if r == role and l.isdigit():
+                level = int(l)
+                break
+        
+        log_admin_action(event.user_id, "set_role", target_id, role)
+        reply(f"✅ {get_user_name(target_id)} назначен: {role} {get_role_emoji(level)}")
+    
+    elif command == "removerole":
+        if get_user_role_level(event.user_id) < 3:
+            reply("❌ Нет прав")
+            return
+        
+        target_id = get_user_id_from_event(event, text)
+        if not target_id:
+            reply("❌ Укажите пользователя")
+            return
+        
+        if target_id == ADMIN_ID:
+            reply("❌ Нельзя снять роль с главного администратора")
+            return
+        
+        if target_id in SYSTEM_ADMINS and event.user_id not in SYSTEM_ADMINS:
+            reply("❌ Нельзя управлять системным администратором")
+            return
+        
+        if not can_manage_user(event.user_id, target_id):
+            reply("❌ Недостаточно прав")
+            return
+        
+        if str(target_id) in db["staff_quest"]:
+            del db["staff_quest"][str(target_id)]
+            if target_id in SYSTEM_ADMINS and target_id != ADMIN_ID:
+                SYSTEM_ADMINS.remove(target_id)
+            save_data(db)
+            log_admin_action(event.user_id, "remove_role", target_id)
+            reply(f"✅ Роль снята с {get_user_name(target_id)}")
         else:
-            reply(f"✅ Квест сохранен за {today}")
+            reply(f"ℹ️ У {get_user_name(target_id)} нет роли")
     
-    elif command == "quests":
-        if not has_permission(event.user_id, "quest_commands") and event.user_id not in SYSTEM_ADMINS:
-            reply("❌ Нет доступа")
-            return
-        
-        date = args[0] if args else ""
-        if not date:
-            reply("❌ Укажите дату (ДД.ММ.ГГ)")
-            return
-        
-        if not re.match(r"\d{2}\.\d{2}\.\d{2}", date):
-            reply("❌ Неверный формат. Пример: 22.05.26")
-            return
-        
-        quests = db["quests"].get(date, [])
-        if not quests:
-            reply(f"📭 Нет квестов за {date}")
-            return
-        
-        result = f"📋 **Квесты за {date}:**\n\n"
-        for i, q in enumerate(quests, 1):
-            result += f"{i}. {q['user_name']}\n   {q['text']}\n\n"
-        
-        if len(result) > 4000:
-            result = result[:4000] + "\n...(обрезано)"
-        reply(result)
-    
-    # ------------------- Список сотрудников -------------------
     elif command == "stafflist":
-        if not has_permission(event.user_id, "view_stats") and event.user_id not in SYSTEM_ADMINS:
+        if get_user_role_level(event.user_id) < 1:
             reply("❌ Нет доступа")
             return
         
         if not db["staff_quest"]:
-            reply("📭 Нет сотрудников")
+            reply("📭 Нет сотрудников отдела")
             return
         
         result = "👥 **Сотрудники отдела:**\n\n"
@@ -950,7 +1049,35 @@ def process_command(event, text, prefix):
         
         reply(result)
     
-    # ------------------- Системные команды -------------------
+    # ------------------- Администрирование -------------------
+    elif command == "admin":
+        if event.user_id not in SYSTEM_ADMINS:
+            reply("❌ Нет доступа к админ-панели")
+            return
+        
+        current_prefix = db.get("prefix", PREFIX)
+        reply(f"""🔧 **Админ-панель**
+
+👑 **Ваша роль:** {get_user_role_name(event.user_id)}
+
+**Команды:**
+`{current_prefix}prefix <новый>` - сменить префикс
+`{current_prefix}maintenance on/off` - тех. работы
+`{current_prefix}reboot` - перезагрузка
+`{current_prefix}resetstats` - сброс статистики
+`{current_prefix}logs` - лог действий
+`{current_prefix}broadcast <текст>` - массовая рассылка
+
+**Управление ссылками:**
+`{current_prefix}links access <уровень> <категории>` - настройка доступа
+`{current_prefix}links add <ссылка> <категория>` - добавить ссылку
+
+**Управление ролями:**
+`{current_prefix}sysadmin add @user` - добавить системного админа
+`{current_prefix}sysadmin list` - список админов
+
+Текущий префикс: `{current_prefix}`""")
+    
     elif command == "prefix":
         if event.user_id not in SYSTEM_ADMINS:
             reply("❌ Нет прав")
@@ -968,7 +1095,7 @@ def process_command(event, text, prefix):
         db["prefix"] = new_prefix
         save_data(db)
         log_admin_action(event.user_id, "change_prefix", None, new_prefix)
-        reply(f"✅ Префикс: `{new_prefix}`")
+        reply(f"✅ Префикс изменен на `{new_prefix}`\n\nВсе команды теперь работают с новым префиксом:\n`{new_prefix}help`\n`{new_prefix}help1`")
     
     elif command == "maintenance":
         if event.user_id not in SYSTEM_ADMINS:
@@ -1010,7 +1137,6 @@ def process_command(event, text, prefix):
         db["commands_used"] = 0
         db["requests_count"] = 0
         db["bot_start_time"] = time.time()
-        db["ping_stats"] = {"total_pings": 0, "response_times": []}
         save_data(db)
         log_admin_action(event.user_id, "reset_stats")
         reply("✅ Статистика сброшена")
@@ -1038,6 +1164,79 @@ def process_command(event, text, prefix):
             result = result[:4000] + "\n...(обрезано)"
         reply(result)
     
+    elif command == "broadcast":
+        if event.user_id not in SYSTEM_ADMINS:
+            reply("❌ Нет прав")
+            return
+        
+        msg_text = " ".join(args)
+        if not msg_text:
+            reply("❌ Введите текст рассылки")
+            return
+        
+        sent = 0
+        for uid in db["trusted_users"]:
+            if send_to_user(uid, f"📢 **Рассылка:**\n{msg_text}"):
+                sent += 1
+            time.sleep(0.3)
+        
+        log_admin_action(event.user_id, "broadcast", None, f"Отправлено {sent} пользователям")
+        reply(f"✅ Рассылка отправлена {sent} пользователям")
+    
+    elif command == "sysadmin":
+        if event.user_id not in SYSTEM_ADMINS:
+            reply("❌ Только системный администратор")
+            return
+        
+        if len(args) < 1:
+            current_prefix = db.get("prefix", PREFIX)
+            reply(f"""🔧 **Управление системными админами:**
+
+`{current_prefix}sysadmin add @user` - добавить
+`{current_prefix}sysadmin remove @user` - удалить
+`{current_prefix}sysadmin list` - список""")
+            return
+        
+        subcmd = args[0].lower()
+        
+        if subcmd == "add":
+            target_id = get_user_id_from_event(event, text)
+            if not target_id:
+                reply("❌ Укажите пользователя")
+                return
+            
+            SYSTEM_ADMINS.add(target_id)
+            db["staff_quest"][str(target_id)] = "Системный администратор"
+            db["quest_access"][str(target_id)] = "all"
+            if target_id not in db["trusted_users"]:
+                db["trusted_users"].append(target_id)
+            save_data(db)
+            log_admin_action(event.user_id, "add_sysadmin", target_id)
+            reply(f"✅ {get_user_name(target_id)} теперь системный администратор")
+        
+        elif subcmd == "remove":
+            target_id = get_user_id_from_event(event, text)
+            if not target_id:
+                reply("❌ Укажите пользователя")
+                return
+            
+            if target_id == ADMIN_ID:
+                reply("❌ Нельзя удалить главного администратора")
+                return
+            
+            if target_id in SYSTEM_ADMINS:
+                SYSTEM_ADMINS.remove(target_id)
+                log_admin_action(event.user_id, "remove_sysadmin", target_id)
+                reply(f"✅ {get_user_name(target_id)} больше не системный администратор")
+            else:
+                reply("ℹ️ Пользователь не является системным администратором")
+        
+        elif subcmd == "list":
+            result = "👑 **Системные администраторы:**\n\n"
+            for uid in SYSTEM_ADMINS:
+                result += f"• {get_user_name(uid)} (ID: {uid})\n"
+            reply(result)
+    
     elif command == "selfadmin":
         if event.user_id != ADMIN_ID:
             reply("❌ Только главный администратор")
@@ -1049,30 +1248,27 @@ def process_command(event, text, prefix):
         if ADMIN_ID not in db["trusted_users"]:
             db["trusted_users"].append(ADMIN_ID)
         save_data(db)
-        reply("""✅ **Вы получили полный доступ!**
+        
+        current_prefix = db.get("prefix", PREFIX)
+        reply(f"""✅ **Вы получили полный доступ!**
 
-👑 **Ваша роль:** Системный администратор (уровень 6)
+👑 **Роль:** Системный администратор (уровень 6)
 
-**Доступные команды:**
-• `!admin` - админ-панель
-• `!role add @user <1-6>` - назначить роль
-• `!sysadmin add @user` - добавить системного админа
-• `!broadcast <текст>` - массовая рассылка
-• `!logs` - просмотр логов
+**Команды:**
+`{current_prefix}admin` - админ-панель
+`{current_prefix}help1` - отдел квестов
+`{current_prefix}links` - система ссылок
+`{current_prefix}links add <ссылка> <категория>` - добавить ссылку
+`{current_prefix}getquests <номер>` - использовать ссылку
 
-**Система ролей:**
-6 👑 Системный администратор
-5 🎯 Куратор отдела
-4 📚 Наставник отдела
-3 📋 Руководитель отдела
-2 📝 Заместитель руководителя
-1 👨‍💻 Сотрудник отдела""")
+Префикс: `{current_prefix}`""")
 
 # ------------------- Основной цикл -------------------
 def main():
     print("=" * 50)
     print("🤖 Страничник запущен на Bothost!")
-    print(f"📌 Префикс: {db.get('prefix', PREFIX)}")
+    current_prefix = db.get("prefix", PREFIX)
+    print(f"📌 Префикс: {current_prefix}")
     print(f"👑 Системный администратор: {ADMIN_ID}")
     print("💬 Работает в ЛС и беседах")
     print("=" * 50)
