@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import traceback
+import threading
 
 # ------------------- Конфигурация -------------------
 USER_TOKEN = os.environ.get('VK_TOKEN', '')
@@ -58,7 +59,8 @@ def load_data():
         "blocked_users": [],
         "prefix": PREFIX,
         "quests": [],
-        "links": [],  # Простой список ссылок, без категорий
+        "links": [],
+        "probiv_tasks": [],
         "quest_access": {str(ADMIN_ID): "all"},
         "staff_quest": {str(ADMIN_ID): "Системный администратор"},
         "maintenance": False,
@@ -89,14 +91,14 @@ def save_data(data):
 
 db = load_data()
 
-# ------------------- Система ролей -------------------
+# ------------------- Новая система ролей -------------------
 ROLES = {
-    "6": {"name": "Системный администратор", "level": 6, "emoji": "👑", "description": "Полный доступ"},
-    "5": {"name": "Куратор отдела", "level": 5, "emoji": "🎯", "description": "Управляет отделом"},
-    "4": {"name": "Наставник отдела", "level": 4, "emoji": "📚", "description": "Обучает сотрудников"},
-    "3": {"name": "Руководитель отдела", "level": 3, "emoji": "📋", "description": "Управляет задачами"},
-    "2": {"name": "Заместитель руководителя", "level": 2, "emoji": "📝", "description": "Помогает с квестами"},
-    "1": {"name": "Сотрудник отдела", "level": 1, "emoji": "👨‍💻", "description": "Выполняет квесты"}
+    "6": {"name": "Системный администратор", "level": 6, "emoji": "👑", "description": "Полный доступ ко всем командам"},
+    "5": {"name": "Администрация GRAND", "level": 5, "emoji": "⭐", "description": "Управление ботом, настройка ссылок"},
+    "4": {"name": "Наставник", "level": 4, "emoji": "📚", "description": "Обучает сотрудников, выдает доступ"},
+    "3": {"name": "Руководитель отдела", "level": 3, "emoji": "📋", "description": "Управляет задачами и сотрудниками"},
+    "2": {"name": "Заместитель руководителя отдела", "level": 2, "emoji": "📝", "description": "Помогает с квестами и пробивом"},
+    "1": {"name": "Куратор обучения", "level": 1, "emoji": "🎓", "description": "Выполняет квесты, базовый доступ"}
 }
 
 def get_user_role_level(user_id):
@@ -239,11 +241,9 @@ def get_user_name(user_id):
     return f"ID{user_id}"
 
 def get_available_links_list(user_id):
-    """Получить список доступных ссылок для пользователя"""
     return db["links"]
 
 def get_available_links(user_id):
-    """Получить форматированный список доступных ссылок"""
     links = get_available_links_list(user_id)
     if not links:
         return "📭 Нет доступных ссылок"
@@ -252,6 +252,94 @@ def get_available_links(user_id):
     for i, link in enumerate(links, 1):
         result += f"{i}. {link}\n"
     return result
+
+def get_chat_name(peer_id):
+    try:
+        if peer_id > 2000000000:
+            chat = vk.messages.getChat(chat_id=peer_id - 2000000000)
+            return chat.get('title', 'Беседа')
+    except:
+        pass
+    return "Беседа"
+
+# ------------------- Функции пробива -------------------
+def send_quest_link(link, chat_id):
+    try:
+        send_chat_message(chat_id, f"/getquests {link}")
+        print(f"✅ Пробив: отправлен квест {link} в чат {chat_id}")
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка пробива: {e}")
+        return False
+
+def execute_probiv(task):
+    try:
+        links = db.get("links", [])
+        
+        if not links:
+            print("❌ Нет ссылок для пробива")
+            return
+        
+        for link in links:
+            send_quest_link(link, task["chat_id"])
+            time.sleep(1)
+            
+        if "probiv_history" not in db:
+            db["probiv_history"] = []
+        
+        db["probiv_history"].append({
+            "time": task["time"],
+            "date": datetime.datetime.now().strftime("%d.%m.%Y"),
+            "chat_id": task["chat_id"],
+            "chat_name": task.get("chat_name", "Неизвестно"),
+            "links_count": len(links),
+            "timestamp": time.time()
+        })
+        save_data(db)
+        
+        print(f"✅ Пробив выполнен в {task['time']}, отправлено {len(links)} ссылок")
+        
+    except Exception as e:
+        print(f"❌ Ошибка выполнения пробива: {e}")
+
+def schedule_probiv(time_str, chat_id, chat_name=""):
+    try:
+        db["probiv_tasks"] = [t for t in db["probiv_tasks"] if t.get("chat_id") != chat_id]
+        
+        task = {
+            "time": time_str,
+            "chat_id": chat_id,
+            "chat_name": chat_name,
+            "created_at": time.time()
+        }
+        db["probiv_tasks"].append(task)
+        save_data(db)
+        
+        return True
+    except Exception as e:
+        print(f"Ошибка планирования: {e}")
+        return False
+
+def check_probiv_schedule():
+    current_time = datetime.datetime.now().strftime("%H:%M")
+    
+    for task in db.get("probiv_tasks", []):
+        if task["time"] == current_time:
+            execute_probiv(task)
+            db["probiv_tasks"] = [t for t in db["probiv_tasks"] if t["time"] != current_time]
+            save_data(db)
+
+def probiv_scheduler_thread():
+    while True:
+        try:
+            check_probiv_schedule()
+            time.sleep(30)
+        except Exception as e:
+            print(f"Ошибка в планировщике: {e}")
+            time.sleep(60)
+
+scheduler_thread = threading.Thread(target=probiv_scheduler_thread, daemon=True)
+scheduler_thread.start()
 
 # ------------------- Обработка команд -------------------
 def process_command(event, text, prefix):
@@ -288,8 +376,68 @@ def process_command(event, text, prefix):
     
     print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {event.user_id}: {command}")
     
-    # ------------------- Система ссылок :links -------------------
-    if command == "links":
+    # ------------------- Команда пробива -------------------
+    if command == "probiv":
+        if get_user_role_level(event.user_id) < 2:
+            reply("❌ Нет прав для настройки пробива")
+            return
+        
+        if len(args) < 1:
+            tasks = db.get("probiv_tasks", [])
+            if not tasks:
+                reply(f"""🔧 **Настройка пробива**
+
+`{current_prefix}probiv <время>` - установить пробив в формате ЧЧ:ММ
+`{current_prefix}probiv off` - отключить пробив
+`{current_prefix}probiv list` - список задач
+
+Пример: `{current_prefix}probiv 15:30`
+
+В указанное время бот автоматически пробивает все ссылки из :links
+Каждая ссылка отправляется в этот чат командой /getquests ссылка""")
+            else:
+                result = "⏰ **Запланированные пробивы:**\n\n"
+                for task in tasks:
+                    result += f"• {task['time']} - чат: {task.get('chat_name', 'Неизвестно')} (ID: {task['chat_id']})\n"
+                reply(result)
+            return
+        
+        subcmd = args[0].lower()
+        
+        if subcmd == "off":
+            db["probiv_tasks"] = [t for t in db["probiv_tasks"] if t.get("chat_id") != event.peer_id]
+            save_data(db)
+            log_admin_action(event.user_id, "probiv_off", None, f"Чат: {event.peer_id}")
+            reply("✅ Пробив отключен для этого чата")
+        
+        elif subcmd == "list":
+            tasks = db.get("probiv_tasks", [])
+            if not tasks:
+                reply("📭 Нет запланированных пробивов")
+                return
+            
+            result = "⏰ **Запланированные пробивы:**\n\n"
+            for task in tasks:
+                result += f"• {task['time']} - чат: {task.get('chat_name', 'Неизвестно')} (ID: {task['chat_id']})\n"
+            reply(result)
+        
+        else:
+            time_str = args[0]
+            
+            if not re.match(r'^([0-1][0-9]|2[0-3]):[0-5][0-9]$', time_str):
+                reply("❌ Неверный формат времени. Используйте ЧЧ:ММ (например, 15:30)")
+                return
+            
+            chat_name = get_chat_name(event.peer_id)
+            
+            if schedule_probiv(time_str, event.peer_id, chat_name):
+                log_admin_action(event.user_id, "probiv_set", None, f"Время: {time_str}, чат: {chat_name}")
+                reply(f"✅ Пробив установлен на {time_str}\n\nВ это время будут автоматически пробиты все ссылки из :links\nКаждая ссылка будет отправлена командой /getquests ссылка")
+            else:
+                reply("❌ Ошибка при установке пробива")
+    
+    # ------------------- Система ссылок -------------------
+    elif command == "links":
         if get_user_role_level(event.user_id) < 1:
             reply("❌ Нет доступа к системе ссылок")
             return
@@ -438,16 +586,21 @@ def process_command(event, text, prefix):
 `{current_prefix}links remove <номер>` - удалить ссылку
 `{current_prefix}getquests <номер>` - использовать ссылку
 
+**Пробив квестов:**
+`{current_prefix}probiv <время>` - установить автоматический пробив
+`{current_prefix}probiv off` - отключить пробив
+`{current_prefix}probiv list` - список задач
+
 **Управление ролями:**
 `{current_prefix}setrole @user <1-6>` - назначить роль
 
 **Расшифровка цифр:**
 6 👑 Системный администратор - полный доступ
-5 🎯 Куратор отдела - управляет отделом
-4 📚 Наставник отдела - обучает сотрудников
-3 📋 Руководитель отдела - управляет задачами
-2 📝 Заместитель руководителя - помогает с квестами
-1 👨‍💻 Сотрудник отдела - выполняет квесты
+5 ⭐ Администрация GRAND - управление ботом
+4 📚 Наставник - обучение сотрудников
+3 📋 Руководитель отдела - управление задачами
+2 📝 Заместитель руководителя отдела - помощь с квестами
+1 🎓 Куратор обучения - выполнение квестов
 
 `{current_prefix}removerole @user` - снять роль
 `{current_prefix}stafflist` - список сотрудников
@@ -478,9 +631,17 @@ def process_command(event, text, prefix):
 `{current_prefix}links clear` - удалить все ссылки (админ)
 
 ━━━━━━━━━━━━━━━━━━━━━
+**⏰ Система пробива:**
+`{current_prefix}probiv <время>` - установить автопробив
+`{current_prefix}probiv off` - отключить пробив
+`{current_prefix}probiv list` - список задач
+
+В указанное время бот автоматически пробивает все ссылки из :links
+Каждая ссылка отправляется командой /getquests ссылка
+
+━━━━━━━━━━━━━━━━━━━━━
 **📋 Квесты:**
 `{current_prefix}getquests <номер>` - использовать ссылку
-(Страничник пишет: /getquests ссылка)
 
 ━━━━━━━━━━━━━━━━━━━━━
 **👥 Управление персоналом:**
@@ -491,11 +652,11 @@ def process_command(event, text, prefix):
 ━━━━━━━━━━━━━━━━━━━━━
 **🎯 Роли (1-6):**
 6 👑 Системный администратор - полный доступ
-5 🎯 Куратор отдела - управляет отделом
-4 📚 Наставник отдела - обучает сотрудников
-3 📋 Руководитель отдела - управляет задачами
-2 📝 Заместитель руководителя - помогает с квестами
-1 👨‍💻 Сотрудник отдела - выполняет квесты"""
+5 ⭐ Администрация GRAND - управление ботом
+4 📚 Наставник - обучение сотрудников
+3 📋 Руководитель отдела - управление задачами
+2 📝 Заместитель руководителя отдела - помощь с квестами
+1 🎓 Куратор обучения - выполнение квестов"""
         reply(help_text)
     
     elif command == "ping":
@@ -526,6 +687,7 @@ def process_command(event, text, prefix):
 • В ЧС: {len(db['blocked_users'])}
 • Квестов: {len(db.get('quests', []))}
 • Ссылок: {len(db['links'])}
+• Задач пробива: {len(db.get('probiv_tasks', []))}
 • Префикс: {current_prefix}""")
     
     elif command == "stats":
@@ -564,6 +726,7 @@ def process_command(event, text, prefix):
    • Сотрудников: {len(db['staff_quest'])}
 
 🔗 **Ссылки:** {len(db['links'])}
+⏰ **Задачи пробива:** {len(db.get('probiv_tasks', []))}
 📊 **Квесты:** {len(db.get('quests', []))}
 📊 Всего команд: {db.get('commands_used', 0)}""")
     
@@ -715,7 +878,7 @@ def process_command(event, text, prefix):
             return
         
         command_name = args[-1]
-        available_commands = ["all", "getquests", "links", "help1", "stafflist", "giveaccess", "setrole"]
+        available_commands = ["all", "getquests", "links", "probiv", "help1", "stafflist", "giveaccess", "setrole"]
         
         if command_name not in available_commands:
             reply(f"❌ Доступные команды: {', '.join(available_commands)}")
@@ -808,11 +971,11 @@ def process_command(event, text, prefix):
 
 **Расшифровка цифр:**
 6 👑 Системный администратор - полный доступ
-5 🎯 Куратор отдела - управляет отделом
-4 📚 Наставник отдела - обучает сотрудников
-3 📋 Руководитель отдела - управляет задачами
-2 📝 Заместитель руководителя - помогает с квестами
-1 👨‍💻 Сотрудник отдела - выполняет квесты
+5 ⭐ Администрация GRAND - управление ботом
+4 📚 Наставник - обучение сотрудников
+3 📋 Руководитель отдела - управление задачами
+2 📝 Заместитель руководителя отдела - помощь с квестами
+1 🎓 Куратор обучения - выполнение квестов
 
 Пример: {current_prefix}setrole @user 5""")
             return
@@ -825,22 +988,22 @@ def process_command(event, text, prefix):
         role_input = args[-1]
         role_map = {
             "6": "Системный администратор",
-            "5": "Куратор отдела",
-            "4": "Наставник отдела",
+            "5": "Администрация GRAND",
+            "4": "Наставник",
             "3": "Руководитель отдела",
-            "2": "Заместитель руководителя",
-            "1": "Сотрудник отдела"
+            "2": "Заместитель руководителя отдела",
+            "1": "Куратор обучения"
         }
         
         if role_input not in role_map:
             reply(f"""❌ Неверный номер роли. Доступные роли:
 
 6 👑 Системный администратор
-5 🎯 Куратор отдела
-4 📚 Наставник отдела
+5 ⭐ Администрация GRAND
+4 📚 Наставник
 3 📋 Руководитель отдела
-2 📝 Заместитель руководителя
-1 👨‍💻 Сотрудник отдела
+2 📝 Заместитель руководителя отдела
+1 🎓 Куратор обучения
 
 Использование: {current_prefix}setrole @user <1-6>""")
             return
@@ -950,6 +1113,9 @@ def process_command(event, text, prefix):
 `{current_prefix}links add <ссылка>` - добавить ссылку
 `{current_prefix}links remove <номер>` - удалить ссылку
 `{current_prefix}links clear` - удалить все ссылки
+
+**Управление пробивом:**
+`{current_prefix}probiv list` - список задач
 
 **Управление ролями:**
 `{current_prefix}sysadmin add @user` - добавить системного админа
@@ -1135,7 +1301,7 @@ def process_command(event, text, prefix):
 `{current_prefix}admin` - админ-панель
 `{current_prefix}help1` - отдел квестов
 `{current_prefix}links` - система ссылок
-`{current_prefix}links add <ссылка>` - добавить ссылку
+`{current_prefix}probiv <время>` - установить автопробив
 `{current_prefix}getquests <номер>` - использовать ссылку
 
 Префикс: `{current_prefix}`""")
