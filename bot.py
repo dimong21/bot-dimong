@@ -9,6 +9,7 @@ import re
 import sys
 import traceback
 import threading
+import shutil
 
 # ------------------- Конфигурация -------------------
 USER_TOKEN = os.environ.get('VK_TOKEN', '')
@@ -60,6 +61,25 @@ except Exception as e:
 
 # ------------------- База данных -------------------
 DATA_FILE = "bot_data.json"
+BACKUP_DIR = "backups"
+
+def create_backup():
+    """Создает резервную копию данных"""
+    try:
+        if not os.path.exists(BACKUP_DIR):
+            os.makedirs(BACKUP_DIR)
+        
+        timestamp = get_current_time_msk().strftime("%Y%m%d_%H%M%S")
+        backup_file = os.path.join(BACKUP_DIR, f"bot_data_{timestamp}.json")
+        
+        if os.path.exists(DATA_FILE):
+            shutil.copy2(DATA_FILE, backup_file)
+            print(f"✅ Создана резервная копия: {backup_file}")
+            return backup_file
+        return None
+    except Exception as e:
+        print(f"❌ Ошибка создания резервной копии: {e}")
+        return None
 
 def load_data():
     default_data = {
@@ -76,7 +96,9 @@ def load_data():
         "commands_used": 0,
         "requests_count": 0,
         "ping_stats": {"total_pings": 0, "response_times": []},
-        "admin_logs": []
+        "admin_logs": [],
+        "last_save": None,
+        "auto_save": True
     }
     
     if os.path.exists(DATA_FILE):
@@ -118,8 +140,24 @@ def save_data(data):
     try:
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-    except:
-        pass
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка сохранения данных: {e}")
+        return False
+
+def force_save():
+    """Принудительное сохранение данных"""
+    global db
+    try:
+        db["last_save"] = get_current_time_msk().strftime("%d.%m.%Y %H:%M:%S")
+        if save_data(db):
+            # Создаем резервную копию при важных изменениях
+            create_backup()
+            return True
+        return False
+    except Exception as e:
+        print(f"❌ Ошибка принудительного сохранения: {e}")
+        return False
 
 db = load_data()
 
@@ -435,8 +473,119 @@ def process_command(event, text, prefix):
     
     print(f"[{get_current_time_str()}] {event.user_id}: {command}")
     
+    # ------------------- Команда сохранения данных -------------------
+    if command == "savedata" or command == "save":
+        if event.user_id not in SYSTEM_ADMINS:
+            reply("❌ Нет прав для сохранения данных")
+            return
+        
+        # Сохраняем данные
+        if force_save():
+            # Получаем информацию о сохранении
+            last_save = db.get("last_save", "не сохранялось")
+            backup_count = 0
+            if os.path.exists(BACKUP_DIR):
+                backup_count = len([f for f in os.listdir(BACKUP_DIR) if f.startswith("bot_data_")])
+            
+            # Статистика данных
+            data_stats = f"""
+📊 **Статистика данных:**
+• Доверенных пользователей: {len(db.get('trusted_users', []))}
+• В ЧС: {len(db.get('blocked_users', []))}
+• Сотрудников отдела: {len(db.get('staff_quest', []))}
+• Ссылок: {len(db.get('links', []))}
+• Квестов: {len(db.get('quests', []))}
+• Задач пробива: {len(db.get('probiv_tasks', []))}
+• Резервных копий: {backup_count}
+• Последнее сохранение: {last_save}
+"""
+            reply(f"✅ **Данные успешно сохранены!**\n{data_stats}")
+            log_admin_action(event.user_id, "manual_save", None, "Принудительное сохранение данных")
+        else:
+            reply("❌ Ошибка при сохранении данных")
+    
+    # ------------------- Команда восстановления из резервной копии -------------------
+    elif command == "loadbackup":
+        if event.user_id not in SYSTEM_ADMINS:
+            reply("❌ Нет прав для восстановления данных")
+            return
+        
+        if len(args) < 1:
+            # Показываем список доступных бэкапов
+            if not os.path.exists(BACKUP_DIR):
+                reply("📭 Нет резервных копий")
+                return
+            
+            backups = sorted([f for f in os.listdir(BACKUP_DIR) if f.startswith("bot_data_")], reverse=True)
+            if not backups:
+                reply("📭 Нет резервных копий")
+                return
+            
+            result = "📁 **Доступные резервные копии:**\n\n"
+            for i, backup in enumerate(backups[:10], 1):
+                backup_time = backup.replace("bot_data_", "").replace(".json", "")
+                result += f"{i}. {backup_time}\n"
+            result += f"\nИспользование: `{current_prefix}loadbackup <номер>`"
+            reply(result)
+            return
+        
+        try:
+            backup_index = int(args[0]) - 1
+            backups = sorted([f for f in os.listdir(BACKUP_DIR) if f.startswith("bot_data_")], reverse=True)
+            
+            if backup_index < 0 or backup_index >= len(backups):
+                reply("❌ Неверный номер резервной копии")
+                return
+            
+            backup_file = os.path.join(BACKUP_DIR, backups[backup_index])
+            
+            with open(backup_file, "r", encoding="utf-8") as f:
+                backup_data = json.load(f)
+            
+            # Восстанавливаем данные, сохраняя текущего админа
+            old_db = db.copy()
+            db.update(backup_data)
+            
+            # Сохраняем текущего админа на всякий случай
+            if str(ADMIN_ID) not in db["staff_quest"]:
+                db["staff_quest"][str(ADMIN_ID)] = "Системный администратор"
+            if ADMIN_ID not in db["trusted_users"]:
+                db["trusted_users"].append(ADMIN_ID)
+            if str(ADMIN_ID) not in db["quest_access"]:
+                db["quest_access"][str(ADMIN_ID)] = "all"
+            
+            save_data(db)
+            log_admin_action(event.user_id, "restore_backup", None, f"Восстановлена копия: {backups[backup_index]}")
+            reply(f"✅ Данные восстановлены из резервной копии: {backups[backup_index]}")
+            
+        except Exception as e:
+            reply(f"❌ Ошибка восстановления: {e}")
+    
+    # ------------------- Команда настройки автосохранения -------------------
+    elif command == "autosave":
+        if event.user_id not in SYSTEM_ADMINS:
+            reply("❌ Нет прав")
+            return
+        
+        if len(args) < 1:
+            current = "включено" if db.get("auto_save", True) else "выключено"
+            reply(f"⚙️ **Автосохранение:** {current}\n\nИспользование: `{current_prefix}autosave on/off`")
+            return
+        
+        mode = args[0].lower()
+        if mode == "on":
+            db["auto_save"] = True
+            save_data(db)
+            reply("✅ Автосохранение ВКЛЮЧЕНО")
+        elif mode == "off":
+            db["auto_save"] = False
+            save_data(db)
+            reply("⚠️ Автосохранение ВЫКЛЮЧЕНО")
+        else:
+            reply("❌ Используйте `on` или `off`")
+    
     # ------------------- Команда получения ссылки на пользователя -------------------
-    if command == "linkid":
+    elif command == "linkid":
         if get_user_role_level(event.user_id) < 2:
             reply("❌ Нет прав")
             return
@@ -696,6 +845,11 @@ def process_command(event, text, prefix):
 `{current_prefix}removerole @user` - снять роль
 `{current_prefix}stafflist` - список сотрудников
 
+**Сохранение данных:**
+`{current_prefix}savedata` - принудительное сохранение данных
+`{current_prefix}loadbackup` - восстановить из резервной копии
+`{current_prefix}autosave on/off` - настройка автосохранения
+
 **Друзья:**
 `{current_prefix}addfriend @user` - добавить в друзья
 `{current_prefix}delfriend @user` - удалить из друзей
@@ -734,9 +888,6 @@ def process_command(event, text, prefix):
 `{current_prefix}probiv off` - отключить пробив
 `{current_prefix}probiv list` - список задач
 
-В указанное время бот автоматически пробивает все ссылки из :links
-Каждая ссылка отправляется командой /getquests ссылка
-
 ━━━━━━━━━━━━━━━━━━━━━
 **📋 Квесты:**
 `{current_prefix}getquests <номер>` - использовать ссылку
@@ -744,6 +895,11 @@ def process_command(event, text, prefix):
 ━━━━━━━━━━━━━━━━━━━━━
 **🔗 Полезное:**
 `{current_prefix}linkid @user` - получить ссылку на пользователя
+
+━━━━━━━━━━━━━━━━━━━━━
+**💾 Сохранение данных:**
+`{current_prefix}savedata` - принудительное сохранение
+`{current_prefix}loadbackup` - восстановление из бэкапа
 
 ━━━━━━━━━━━━━━━━━━━━━
 **👥 Управление персоналом:**
@@ -986,7 +1142,7 @@ def process_command(event, text, prefix):
             return
         
         command_name = args[-1]
-        available_commands = ["all", "getquests", "links", "probiv", "linkid", "help1", "stafflist", "giveaccess", "setrole"]
+        available_commands = ["all", "getquests", "links", "probiv", "linkid", "savedata", "help1", "stafflist", "giveaccess", "setrole"]
         
         if command_name not in available_commands:
             reply(f"❌ Доступные команды: {', '.join(available_commands)}")
@@ -1219,6 +1375,11 @@ def process_command(event, text, prefix):
 `{current_prefix}logs` - лог действий
 `{current_prefix}broadcast <текст>` - массовая рассылка
 
+**Сохранение данных:**
+`{current_prefix}savedata` - принудительное сохранение
+`{current_prefix}loadbackup` - восстановление из бэкапа
+`{current_prefix}autosave on/off` - настройка автосохранения
+
 **Управление ссылками:**
 `{current_prefix}links add <ссылка>` - добавить ссылку
 `{current_prefix}links remove <номер>` - удалить ссылку
@@ -1419,6 +1580,7 @@ def process_command(event, text, prefix):
 `{current_prefix}probiv <время>` - установить автопробив (МСК)
 `{current_prefix}getquests <номер>` - использовать ссылку
 `{current_prefix}linkid @user` - получить ссылку на пользователя
+`{current_prefix}savedata` - сохранить данные
 
 Префикс: `{current_prefix}`""")
     
@@ -1515,6 +1677,9 @@ def process_command(event, text, prefix):
             reply("❌ Только главный администратор")
             return
         
+        # Создаем резервную копию перед очисткой
+        create_backup()
+        
         db["trusted_users"] = [ADMIN_ID]
         db["blocked_users"] = []
         db["quest_access"] = {str(ADMIN_ID): "all"}
@@ -1525,7 +1690,7 @@ def process_command(event, text, prefix):
         SYSTEM_ADMINS.add(ADMIN_ID)
         
         save_data(db)
-        reply("✅ Все данные очищены. Остались только главный администратор.")
+        reply("✅ Все данные очищены. Остались только главный администратор.\n📁 Создана резервная копия перед очисткой.")
 
 # ------------------- Основной цикл -------------------
 def main():
@@ -1538,6 +1703,17 @@ def main():
     print("💬 Работает в ЛС и беседах")
     print("=" * 50)
     print("Ожидание команд...")
+    
+    # Автоматическое сохранение каждые 30 минут
+    def auto_save_thread():
+        while True:
+            time.sleep(1800)  # 30 минут
+            if db.get("auto_save", True):
+                print("🔄 Автосохранение...")
+                force_save()
+    
+    auto_save_thread = threading.Thread(target=auto_save_thread, daemon=True)
+    auto_save_thread.start()
     
     while True:
         try:
