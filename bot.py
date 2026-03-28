@@ -121,6 +121,11 @@ def get_role_emoji(level):
             return role_data["emoji"]
     return "👤"
 
+def get_user_mention(user_id):
+    """Создает ссылку на пользователя [id123|Имя]"""
+    name = get_user_name(user_id)
+    return f"[id{user_id}|{name}]"
+
 def has_permission(user_id, permission):
     if user_id in SYSTEM_ADMINS:
         return True
@@ -670,7 +675,7 @@ def process_command(event, text, prefix):
                 vk.messages.send(user_id=target_id, message="🏓", random_id=get_random_id())
                 end = time.time()
                 ping_ms = (end - start) * 1000
-                reply(f"🏓 Пинг {get_user_name(target_id)}: {ping_ms:.0f} мс")
+                reply(f"🏓 Пинг {get_user_mention(target_id)}: {ping_ms:.0f} мс")
             except:
                 reply("❌ Пользователь не отвечает")
             return
@@ -692,14 +697,14 @@ def process_command(event, text, prefix):
     
     elif command == "stats":
         user_id = event.user_id
-        user_name = get_user_name(user_id)
+        user_mention = get_user_mention(user_id)
         role_level = get_user_role_level(user_id)
         role_name = get_user_role_name(user_id)
         is_trust = "✅" if is_trusted(user_id) else "❌"
         
         user_quests = [q for q in db.get("quests", []) if q.get("user_id") == user_id]
         
-        reply(f"""📊 **Ваша статистика:** {user_name}
+        reply(f"""📊 **Ваша статистика:** {user_mention}
 
 • ID: {user_id}
 • Роль: {role_name} {get_role_emoji(role_level)}
@@ -743,7 +748,7 @@ def process_command(event, text, prefix):
         
         try:
             vk.friends.add(user_id=target_id)
-            reply(f"✅ Запрос отправлен {get_user_name(target_id)}")
+            reply(f"✅ Запрос отправлен {get_user_mention(target_id)}")
         except Exception as e:
             reply(f"❌ Ошибка: {e}")
     
@@ -759,7 +764,7 @@ def process_command(event, text, prefix):
         
         try:
             vk.friends.delete(user_id=target_id)
-            reply(f"✅ {get_user_name(target_id)} удален из друзей")
+            reply(f"✅ {get_user_mention(target_id)} удален из друзей")
         except Exception as e:
             reply(f"❌ Ошибка: {e}")
     
@@ -778,9 +783,9 @@ def process_command(event, text, prefix):
             db["trusted_users"].append(target_id)
             save_data(db)
             log_admin_action(event.user_id, "trust_add", target_id)
-            reply(f"✅ {get_user_name(target_id)} добавлен в доверенные")
+            reply(f"✅ {get_user_mention(target_id)} добавлен в доверенные")
         else:
-            reply(f"ℹ️ Уже в доверенных")
+            reply(f"ℹ️ {get_user_mention(target_id)} уже в доверенных")
     
     elif command == "untrust":
         if get_user_role_level(event.user_id) < 2:
@@ -796,9 +801,9 @@ def process_command(event, text, prefix):
             db["trusted_users"].remove(target_id)
             save_data(db)
             log_admin_action(event.user_id, "trust_remove", target_id)
-            reply(f"✅ {get_user_name(target_id)} удален из доверенных")
+            reply(f"✅ {get_user_mention(target_id)} удален из доверенных")
         else:
-            reply(f"ℹ️ Не в доверенных")
+            reply(f"ℹ️ {get_user_mention(target_id)} не в доверенных")
     
     elif command == "block":
         if event.user_id not in SYSTEM_ADMINS:
@@ -818,9 +823,9 @@ def process_command(event, text, prefix):
             db["blocked_users"].append(target_id)
             save_data(db)
             log_admin_action(event.user_id, "block_add", target_id)
-            reply(f"✅ {get_user_name(target_id)} добавлен в ЧС")
+            reply(f"✅ {get_user_mention(target_id)} добавлен в ЧС")
         else:
-            reply(f"ℹ️ Уже в ЧС")
+            reply(f"ℹ️ {get_user_mention(target_id)} уже в ЧС")
     
     elif command == "unblock":
         if event.user_id not in SYSTEM_ADMINS:
@@ -836,9 +841,9 @@ def process_command(event, text, prefix):
             db["blocked_users"].remove(target_id)
             save_data(db)
             log_admin_action(event.user_id, "block_remove", target_id)
-            reply(f"✅ {get_user_name(target_id)} удален из ЧС")
+            reply(f"✅ {get_user_mention(target_id)} удален из ЧС")
         else:
-            reply(f"ℹ️ Не в ЧС")
+            reply(f"ℹ️ {get_user_mention(target_id)} не в ЧС")
     
     # ------------------- Сообщения -------------------
     elif command == "send":
@@ -858,7 +863,7 @@ def process_command(event, text, prefix):
         
         if send_to_user(target_id, msg_text):
             log_admin_action(event.user_id, "send_message", target_id, msg_text[:100])
-            reply(f"✅ Сообщение отправлено {get_user_name(target_id)}")
+            reply(f"✅ Сообщение отправлено {get_user_mention(target_id)}")
         else:
             reply("❌ Ошибка отправки")
     
@@ -897,7 +902,7 @@ def process_command(event, text, prefix):
         
         save_data(db)
         log_admin_action(event.user_id, "give_access", target_id, command_name)
-        reply(f"✅ {get_user_name(target_id)} получил доступ к команде `{command_name}`")
+        reply(f"✅ {get_user_mention(target_id)} получил доступ к команде `{command_name}`")
     
     elif command == "removeaccess":
         if get_user_role_level(event.user_id) < 2:
@@ -919,7 +924,7 @@ def process_command(event, text, prefix):
         if user_access == "all":
             if command_name == "all":
                 del db["quest_access"][str(target_id)]
-                reply(f"✅ У {get_user_name(target_id)} удален полный доступ")
+                reply(f"✅ У {get_user_mention(target_id)} удален полный доступ")
             else:
                 reply("❌ У пользователя полный доступ. Используйте: !removeaccess @user all")
                 return
@@ -929,9 +934,9 @@ def process_command(event, text, prefix):
                 del db["quest_access"][str(target_id)]
             else:
                 db["quest_access"][str(target_id)] = user_access
-            reply(f"✅ У {get_user_name(target_id)} удален доступ к команде `{command_name}`")
+            reply(f"✅ У {get_user_mention(target_id)} удален доступ к команде `{command_name}`")
         else:
-            reply(f"❌ У {get_user_name(target_id)} нет доступа к команде `{command_name}`")
+            reply(f"❌ У {get_user_mention(target_id)} нет доступа к команде `{command_name}`")
             return
         
         save_data(db)
@@ -956,7 +961,7 @@ def process_command(event, text, prefix):
         else:
             text_access = "🎯 Нет доступа"
         
-        reply(f"""📋 **Доступ пользователя {get_user_name(target_id)}**
+        reply(f"""📋 **Доступ пользователя {get_user_mention(target_id)}**
 
 👤 Роль: {role_name} {get_role_emoji(get_user_role_level(target_id))}
 {text_access}""")
@@ -1030,7 +1035,7 @@ def process_command(event, text, prefix):
         save_data(db)
         
         log_admin_action(event.user_id, "set_role", target_id, role)
-        reply(f"✅ {get_user_name(target_id)} назначен: {role} {get_role_emoji(int(role_input))}")
+        reply(f"✅ {get_user_mention(target_id)} назначен: {role} {get_role_emoji(int(role_input))}")
     
     elif command == "removerole":
         if get_user_role_level(event.user_id) < 3:
@@ -1065,9 +1070,9 @@ def process_command(event, text, prefix):
                 SYSTEM_ADMINS.remove(target_id)
             save_data(db)
             log_admin_action(event.user_id, "remove_role", target_id, old_role)
-            reply(f"✅ Роль снята с {get_user_name(target_id)}")
+            reply(f"✅ Роль снята с {get_user_mention(target_id)}")
         else:
-            reply(f"ℹ️ У {get_user_name(target_id)} нет роли")
+            reply(f"ℹ️ У {get_user_mention(target_id)} нет роли")
     
     elif command == "stafflist":
         if get_user_role_level(event.user_id) < 1:
@@ -1085,7 +1090,7 @@ def process_command(event, text, prefix):
             if members:
                 result += f"**{role_name}** {get_role_emoji(level)}:\n"
                 for uid in members:
-                    name = get_user_name(int(uid))
+                    name = get_user_mention(int(uid))
                     result += f"  • {name}\n"
                 result += "\n"
         
@@ -1256,7 +1261,7 @@ def process_command(event, text, prefix):
                 db["trusted_users"].append(target_id)
             save_data(db)
             log_admin_action(event.user_id, "add_sysadmin", target_id)
-            reply(f"✅ {get_user_name(target_id)} теперь системный администратор")
+            reply(f"✅ {get_user_mention(target_id)} теперь системный администратор")
         
         elif subcmd == "remove":
             target_id = get_user_id_from_event(event, text)
@@ -1271,14 +1276,14 @@ def process_command(event, text, prefix):
             if target_id in SYSTEM_ADMINS:
                 SYSTEM_ADMINS.remove(target_id)
                 log_admin_action(event.user_id, "remove_sysadmin", target_id)
-                reply(f"✅ {get_user_name(target_id)} больше не системный администратор")
+                reply(f"✅ {get_user_mention(target_id)} больше не системный администратор")
             else:
                 reply("ℹ️ Пользователь не является системным администратором")
         
         elif subcmd == "list":
             result = "👑 **Системные администраторы:**\n\n"
             for uid in SYSTEM_ADMINS:
-                result += f"• {get_user_name(uid)} (ID: {uid})\n"
+                result += f"• {get_user_mention(uid)}\n"
             reply(result)
     
     elif command == "selfadmin":
