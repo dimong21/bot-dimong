@@ -30,10 +30,18 @@ if ADMIN_ID == 0:
 
 SYSTEM_ADMINS = {ADMIN_ID}
 
+# Устанавливаем часовой пояс МСК (UTC+3)
+os.environ['TZ'] = 'Europe/Moscow'
+try:
+    time.tzset()
+except AttributeError:
+    pass
+
 print("=" * 50)
 print("🤖 Страничник запускается...")
 print(f"📌 Префикс: {PREFIX}")
 print(f"👤 Системный администратор: {ADMIN_ID}")
+print(f"🕐 Часовой пояс: МСК (UTC+3)")
 print("=" * 50)
 
 # ------------------- Инициализация VK API -------------------
@@ -70,17 +78,41 @@ def load_data():
         "ping_stats": {"total_pings": 0, "response_times": []},
         "admin_logs": []
     }
+    
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                
                 for key, value in default_data.items():
                     if key not in data:
+                        print(f"⚠️ Восстанавливаю: {key}")
                         data[key] = value
+                
+                if "staff_quest" not in data:
+                    data["staff_quest"] = {}
+                if str(ADMIN_ID) not in data["staff_quest"]:
+                    print(f"✅ Добавляю админа {ADMIN_ID} в staff_quest")
+                    data["staff_quest"][str(ADMIN_ID)] = "Системный администратор"
+                
+                if "quest_access" not in data:
+                    data["quest_access"] = {}
+                if str(ADMIN_ID) not in data["quest_access"]:
+                    data["quest_access"][str(ADMIN_ID)] = "all"
+                
+                if "trusted_users" not in data:
+                    data["trusted_users"] = []
+                if ADMIN_ID not in data["trusted_users"]:
+                    data["trusted_users"].append(ADMIN_ID)
+                
                 return data
-        except:
+                
+        except Exception as e:
+            print(f"❌ Ошибка загрузки: {e}")
             return default_data
-    return default_data
+    else:
+        print("📁 Создаю новый файл данных")
+        return default_data
 
 def save_data(data):
     try:
@@ -100,6 +132,19 @@ ROLES = {
     "2": {"name": "Заместитель руководителя отдела", "level": 2, "emoji": "📝", "description": "Помогает с квестами и пробивом"},
     "1": {"name": "Куратор обучения", "level": 1, "emoji": "🎓", "description": "Выполняет квесты, базовый доступ"}
 }
+
+def get_current_time_msk():
+    """Возвращает текущее время по МСК"""
+    msk_time = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=3)))
+    return msk_time
+
+def get_current_time_str():
+    """Возвращает текущее время в формате ЧЧ:ММ по МСК"""
+    return get_current_time_msk().strftime("%H:%M")
+
+def get_current_date_str():
+    """Возвращает текущую дату по МСК"""
+    return get_current_time_msk().strftime("%d.%m.%Y")
 
 def get_user_role_level(user_id):
     if user_id in SYSTEM_ADMINS:
@@ -126,6 +171,10 @@ def get_user_mention(user_id):
     name = get_user_name(user_id)
     return f"[id{user_id}|{name}]"
 
+def get_user_link(user_id):
+    """Создает ссылку на профиль пользователя vk.com/id123"""
+    return f"https://vk.com/id{user_id}"
+
 def has_permission(user_id, permission):
     if user_id in SYSTEM_ADMINS:
         return True
@@ -141,7 +190,7 @@ def can_manage_user(manager_id, target_id):
 def log_admin_action(admin_id, action, target_id=None, details=""):
     log_entry = {
         "timestamp": time.time(),
-        "date": datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
+        "date": get_current_time_msk().strftime("%d.%m.%Y %H:%M:%S"),
         "admin_id": admin_id,
         "admin_name": get_user_name(admin_id),
         "action": action,
@@ -267,7 +316,7 @@ def get_chat_name(peer_id):
         pass
     return "Беседа"
 
-# ------------------- Функции пробива -------------------
+# ------------------- Функции пробива (по МСК) -------------------
 def send_quest_link(link, chat_id):
     try:
         send_chat_message(chat_id, f"/getquests {link}")
@@ -292,9 +341,11 @@ def execute_probiv(task):
         if "probiv_history" not in db:
             db["probiv_history"] = []
         
+        current_time = get_current_time_msk()
         db["probiv_history"].append({
             "time": task["time"],
-            "date": datetime.datetime.now().strftime("%d.%m.%Y"),
+            "date": current_time.strftime("%d.%m.%Y"),
+            "datetime": current_time.strftime("%d.%m.%Y %H:%M:%S"),
             "chat_id": task["chat_id"],
             "chat_name": task.get("chat_name", "Неизвестно"),
             "links_count": len(links),
@@ -302,7 +353,7 @@ def execute_probiv(task):
         })
         save_data(db)
         
-        print(f"✅ Пробив выполнен в {task['time']}, отправлено {len(links)} ссылок")
+        print(f"✅ Пробив выполнен в {task['time']} (МСК), отправлено {len(links)} ссылок")
         
     except Exception as e:
         print(f"❌ Ошибка выполнения пробива: {e}")
@@ -315,7 +366,8 @@ def schedule_probiv(time_str, chat_id, chat_name=""):
             "time": time_str,
             "chat_id": chat_id,
             "chat_name": chat_name,
-            "created_at": time.time()
+            "created_at": time.time(),
+            "created_at_msk": get_current_time_msk().strftime("%d.%m.%Y %H:%M:%S")
         }
         db["probiv_tasks"].append(task)
         save_data(db)
@@ -326,10 +378,12 @@ def schedule_probiv(time_str, chat_id, chat_name=""):
         return False
 
 def check_probiv_schedule():
-    current_time = datetime.datetime.now().strftime("%H:%M")
+    """Проверяет расписание пробива по МСК"""
+    current_time = get_current_time_str()
     
     for task in db.get("probiv_tasks", []):
         if task["time"] == current_time:
+            print(f"⏰ Сработал пробив на {current_time} МСК")
             execute_probiv(task)
             db["probiv_tasks"] = [t for t in db["probiv_tasks"] if t["time"] != current_time]
             save_data(db)
@@ -379,20 +433,44 @@ def process_command(event, text, prefix):
     
     current_prefix = db.get("prefix", PREFIX)
     
-    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {event.user_id}: {command}")
+    print(f"[{get_current_time_str()}] {event.user_id}: {command}")
+    
+    # ------------------- Команда получения ссылки на пользователя -------------------
+    if command == "linkid":
+        if get_user_role_level(event.user_id) < 2:
+            reply("❌ Нет прав")
+            return
+        
+        target_id = get_user_id_from_event(event, text)
+        if not target_id:
+            reply("❌ Укажите пользователя (ответом на сообщение или @упоминанием)")
+            return
+        
+        user_link = get_user_link(target_id)
+        user_mention = get_user_mention(target_id)
+        
+        reply(f"""🔗 **Ссылка на пользователя:**
+
+👤 {user_mention}
+📎 Ссылка: {user_link}
+🆔 ID: {target_id}""")
     
     # ------------------- Команда пробива -------------------
-    if command == "probiv":
+    elif command == "probiv":
         if get_user_role_level(event.user_id) < 2:
             reply("❌ Нет прав для настройки пробива")
             return
         
         if len(args) < 1:
             tasks = db.get("probiv_tasks", [])
+            current_msk = get_current_time_str()
+            
             if not tasks:
-                reply(f"""🔧 **Настройка пробива**
+                reply(f"""🔧 **Настройка пробива (МСК)**
 
-`{current_prefix}probiv <время>` - установить пробив в формате ЧЧ:ММ
+🕐 Текущее время МСК: {current_msk}
+
+`{current_prefix}probiv <время>` - установить пробив в формате ЧЧ:ММ (по МСК)
 `{current_prefix}probiv off` - отключить пробив
 `{current_prefix}probiv list` - список задач
 
@@ -401,9 +479,9 @@ def process_command(event, text, prefix):
 В указанное время бот автоматически пробивает все ссылки из :links
 Каждая ссылка отправляется в этот чат командой /getquests ссылка""")
             else:
-                result = "⏰ **Запланированные пробивы:**\n\n"
+                result = f"⏰ **Запланированные пробивы (МСК):**\n🕐 Текущее время: {current_msk}\n\n"
                 for task in tasks:
-                    result += f"• {task['time']} - чат: {task.get('chat_name', 'Неизвестно')} (ID: {task['chat_id']})\n"
+                    result += f"• {task['time']} - чат: {task.get('chat_name', 'Неизвестно')}\n"
                 reply(result)
             return
         
@@ -417,27 +495,30 @@ def process_command(event, text, prefix):
         
         elif subcmd == "list":
             tasks = db.get("probiv_tasks", [])
+            current_msk = get_current_time_str()
+            
             if not tasks:
                 reply("📭 Нет запланированных пробивов")
                 return
             
-            result = "⏰ **Запланированные пробивы:**\n\n"
+            result = f"⏰ **Запланированные пробивы (МСК):**\n🕐 Текущее время: {current_msk}\n\n"
             for task in tasks:
-                result += f"• {task['time']} - чат: {task.get('chat_name', 'Неизвестно')} (ID: {task['chat_id']})\n"
+                result += f"• {task['time']} - чат: {task.get('chat_name', 'Неизвестно')}\n"
             reply(result)
         
         else:
             time_str = args[0]
             
             if not re.match(r'^([0-1][0-9]|2[0-3]):[0-5][0-9]$', time_str):
-                reply("❌ Неверный формат времени. Используйте ЧЧ:ММ (например, 15:30)")
+                reply("❌ Неверный формат времени. Используйте ЧЧ:ММ (по МСК)\nПример: 15:30")
                 return
             
             chat_name = get_chat_name(event.peer_id)
+            current_msk = get_current_time_str()
             
             if schedule_probiv(time_str, event.peer_id, chat_name):
-                log_admin_action(event.user_id, "probiv_set", None, f"Время: {time_str}, чат: {chat_name}")
-                reply(f"✅ Пробив установлен на {time_str}\n\nВ это время будут автоматически пробиты все ссылки из :links\nКаждая ссылка будет отправлена командой /getquests ссылка")
+                log_admin_action(event.user_id, "probiv_set", None, f"Время: {time_str} МСК, чат: {chat_name}")
+                reply(f"✅ Пробив установлен на {time_str} (МСК)\n🕐 Текущее время: {current_msk}\n\nВ это время будут автоматически пробиты все ссылки из :links")
             else:
                 reply("❌ Ошибка при установке пробива")
     
@@ -558,7 +639,7 @@ def process_command(event, text, prefix):
             "user_name": get_user_name(event.user_id),
             "link": selected_link,
             "timestamp": time.time(),
-            "date": datetime.datetime.now().strftime("%d.%m.%y %H:%M")
+            "date": get_current_time_msk().strftime("%d.%m.%y %H:%M")
         }
         
         if "quests" not in db:
@@ -575,9 +656,11 @@ def process_command(event, text, prefix):
     
     # ------------------- Основные команды -------------------
     elif command == "help":
+        current_time = get_current_time_str()
         help_text = f"""🤖 **Страничник - помощь**
 
 👤 **Ваша роль:** {get_user_role_name(event.user_id)} {get_role_emoji(get_user_role_level(event.user_id))}
+🕐 **МСК:** {current_time}
 
 **Основные команды:**
 `{current_prefix}help` - это сообщение
@@ -592,7 +675,7 @@ def process_command(event, text, prefix):
 `{current_prefix}getquests <номер>` - использовать ссылку
 
 **Пробив квестов:**
-`{current_prefix}probiv <время>` - установить автоматический пробив
+`{current_prefix}probiv <время>` - установить автоматический пробив (МСК)
 `{current_prefix}probiv off` - отключить пробив
 `{current_prefix}probiv list` - список задач
 
@@ -607,6 +690,9 @@ def process_command(event, text, prefix):
 2 📝 Заместитель руководителя отдела - помощь с квестами
 1 🎓 Куратор обучения - выполнение квестов
 
+**Полезное:**
+`{current_prefix}linkid @user` - получить ссылку на пользователя
+
 `{current_prefix}removerole @user` - снять роль
 `{current_prefix}stafflist` - список сотрудников
 
@@ -618,7 +704,11 @@ def process_command(event, text, prefix):
 `{current_prefix}trust @user` - добавить в доверенные
 `{current_prefix}untrust @user` - удалить из доверенных
 
-**Для администраторов:** `{current_prefix}admin`"""
+**Администрирование:**
+`{current_prefix}admin` - админ-панель
+`{current_prefix}admins` - список всех админов
+`{current_prefix}fixdata` - восстановить данные админов
+`{current_prefix}cleardata` - очистить все данные (осторожно!)"""
         reply(help_text)
     
     elif command == "help1":
@@ -626,7 +716,10 @@ def process_command(event, text, prefix):
             reply("❌ У вас нет доступа к командам отдела квестов")
             return
         
+        current_time = get_current_time_str()
         help_text = f"""🎯 **Отдел квестов - команды:**
+
+🕐 **МСК:** {current_time}
 
 ━━━━━━━━━━━━━━━━━━━━━
 **🔗 Система ссылок:**
@@ -636,7 +729,7 @@ def process_command(event, text, prefix):
 `{current_prefix}links clear` - удалить все ссылки (админ)
 
 ━━━━━━━━━━━━━━━━━━━━━
-**⏰ Система пробива:**
+**⏰ Система пробива (МСК):**
 `{current_prefix}probiv <время>` - установить автопробив
 `{current_prefix}probiv off` - отключить пробив
 `{current_prefix}probiv list` - список задач
@@ -647,6 +740,10 @@ def process_command(event, text, prefix):
 ━━━━━━━━━━━━━━━━━━━━━
 **📋 Квесты:**
 `{current_prefix}getquests <номер>` - использовать ссылку
+
+━━━━━━━━━━━━━━━━━━━━━
+**🔗 Полезное:**
+`{current_prefix}linkid @user` - получить ссылку на пользователя
 
 ━━━━━━━━━━━━━━━━━━━━━
 **👥 Управление персоналом:**
@@ -682,8 +779,11 @@ def process_command(event, text, prefix):
         
         avg_req, avg_cmd = calculate_averages()
         uptime = format_uptime()
+        current_time = get_current_time_str()
         
         reply(f"""🏓 **Pong!**
+
+🕐 **МСК:** {current_time}
 
 📊 **Статистика:**
 • Время работы: {uptime}
@@ -716,8 +816,11 @@ def process_command(event, text, prefix):
     elif command == "botstats":
         avg_req, avg_cmd = calculate_averages()
         uptime = format_uptime()
+        current_time = get_current_time_str()
         
         reply(f"""🤖 **Статистика бота**
+
+🕐 **МСК:** {current_time}
 
 ⏱ Время работы: {uptime}
 📈 Средняя нагрузка/час:
@@ -883,7 +986,7 @@ def process_command(event, text, prefix):
             return
         
         command_name = args[-1]
-        available_commands = ["all", "getquests", "links", "probiv", "help1", "stafflist", "giveaccess", "setrole"]
+        available_commands = ["all", "getquests", "links", "probiv", "linkid", "help1", "stafflist", "giveaccess", "setrole"]
         
         if command_name not in available_commands:
             reply(f"❌ Доступные команды: {', '.join(available_commands)}")
@@ -1102,9 +1205,11 @@ def process_command(event, text, prefix):
             reply("❌ Нет доступа к админ-панели")
             return
         
+        current_time = get_current_time_str()
         reply(f"""🔧 **Админ-панель**
 
 👑 **Ваша роль:** {get_user_role_name(event.user_id)}
+🕐 **МСК:** {current_time}
 
 **Команды:**
 `{current_prefix}prefix <новый>` - сменить префикс
@@ -1120,11 +1225,14 @@ def process_command(event, text, prefix):
 `{current_prefix}links clear` - удалить все ссылки
 
 **Управление пробивом:**
-`{current_prefix}probiv list` - список задач
+`{current_prefix}probiv list` - список задач (МСК)
 
 **Управление ролями:**
 `{current_prefix}sysadmin add @user` - добавить системного админа
 `{current_prefix}sysadmin list` - список админов
+`{current_prefix}admins` - все админы и сотрудники
+`{current_prefix}fixdata` - восстановить данные
+`{current_prefix}cleardata` - очистить данные
 
 Текущий префикс: `{current_prefix}`""")
     
@@ -1298,18 +1406,126 @@ def process_command(event, text, prefix):
             db["trusted_users"].append(ADMIN_ID)
         save_data(db)
         
+        current_time = get_current_time_str()
         reply(f"""✅ **Вы получили полный доступ!**
 
 👑 **Роль:** Системный администратор (уровень 6)
+🕐 **МСК:** {current_time}
 
 **Команды:**
 `{current_prefix}admin` - админ-панель
 `{current_prefix}help1` - отдел квестов
 `{current_prefix}links` - система ссылок
-`{current_prefix}probiv <время>` - установить автопробив
+`{current_prefix}probiv <время>` - установить автопробив (МСК)
 `{current_prefix}getquests <номер>` - использовать ссылку
+`{current_prefix}linkid @user` - получить ссылку на пользователя
 
 Префикс: `{current_prefix}`""")
+    
+    # ------------------- Команды восстановления данных -------------------
+    elif command == "fixdata":
+        if event.user_id != ADMIN_ID:
+            reply("❌ Только главный администратор")
+            return
+        
+        if str(ADMIN_ID) not in db["staff_quest"]:
+            db["staff_quest"][str(ADMIN_ID)] = "Системный администратор"
+        
+        if str(ADMIN_ID) not in db["quest_access"]:
+            db["quest_access"][str(ADMIN_ID)] = "all"
+        
+        if ADMIN_ID not in db["trusted_users"]:
+            db["trusted_users"].append(ADMIN_ID)
+        
+        if ADMIN_ID not in SYSTEM_ADMINS:
+            SYSTEM_ADMINS.add(ADMIN_ID)
+        
+        save_data(db)
+        
+        result = "✅ **Данные восстановлены!**\n\n"
+        result += "👑 **Системные администраторы:**\n"
+        for uid in SYSTEM_ADMINS:
+            result += f"• {get_user_mention(uid)}\n"
+        
+        result += "\n📋 **Сотрудники отдела:**\n"
+        if db["staff_quest"]:
+            for uid, role in db["staff_quest"].items():
+                result += f"• {get_user_mention(int(uid))} - {role}\n"
+        else:
+            result += "Нет сотрудников\n"
+        
+        result += "\n✅ **Доверенные пользователи:**\n"
+        if db["trusted_users"]:
+            for uid in db["trusted_users"]:
+                result += f"• {get_user_mention(uid)}\n"
+        else:
+            result += "Нет доверенных\n"
+        
+        reply(result)
+    
+    elif command == "admins":
+        if get_user_role_level(event.user_id) < 5:
+            reply("❌ Нет прав")
+            return
+        
+        result = "👑 **Системные администраторы:**\n\n"
+        
+        if SYSTEM_ADMINS:
+            for uid in SYSTEM_ADMINS:
+                result += f"• {get_user_mention(uid)}"
+                if uid == ADMIN_ID:
+                    result += " (главный)"
+                result += "\n"
+        else:
+            result += "Нет системных администраторов\n"
+        
+        result += "\n📋 **Сотрудники из staff_quest:**\n"
+        if db["staff_quest"]:
+            for uid, role in db["staff_quest"].items():
+                result += f"• {get_user_mention(int(uid))} - {role}\n"
+        else:
+            result += "Нет сотрудников\n"
+        
+        result += "\n✅ **Доверенные пользователи:**\n"
+        if db["trusted_users"]:
+            for uid in db["trusted_users"]:
+                result += f"• {get_user_mention(uid)}\n"
+        else:
+            result += "Нет доверенных\n"
+        
+        result += "\n🔓 **Пользователи с доступом к командам:**\n"
+        if db["quest_access"]:
+            for uid, access in db["quest_access"].items():
+                result += f"• {get_user_mention(int(uid))} - {access}\n"
+        else:
+            result += "Нет пользователей с доступом\n"
+        
+        reply(result)
+    
+    elif command == "cleardata":
+        if event.user_id != ADMIN_ID:
+            reply("❌ Только главный администратор")
+            return
+        
+        reply("⚠️ **ВНИМАНИЕ!** Это удалит все данные о пользователях.\n"
+              "Для подтверждения введите: `!confirmclear`")
+    
+    elif command == "confirmclear":
+        if event.user_id != ADMIN_ID:
+            reply("❌ Только главный администратор")
+            return
+        
+        db["trusted_users"] = [ADMIN_ID]
+        db["blocked_users"] = []
+        db["quest_access"] = {str(ADMIN_ID): "all"}
+        db["staff_quest"] = {str(ADMIN_ID): "Системный администратор"}
+        db["admin_logs"] = []
+        
+        SYSTEM_ADMINS.clear()
+        SYSTEM_ADMINS.add(ADMIN_ID)
+        
+        save_data(db)
+        reply("✅ Все данные очищены. Остались только главный администратор.")
 
 # ------------------- Основной цикл -------------------
 def main():
@@ -1318,6 +1534,7 @@ def main():
     current_prefix = db.get("prefix", PREFIX)
     print(f"📌 Префикс: {current_prefix}")
     print(f"👑 Системный администратор: {ADMIN_ID}")
+    print(f"🕐 Часовой пояс: МСК (UTC+3)")
     print("💬 Работает в ЛС и беседах")
     print("=" * 50)
     print("Ожидание команд...")
