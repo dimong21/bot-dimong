@@ -151,7 +151,6 @@ def force_save():
     try:
         db["last_save"] = get_current_time_msk().strftime("%d.%m.%Y %H:%M:%S")
         if save_data(db):
-            # Создаем резервную копию при важных изменениях
             create_backup()
             return True
         return False
@@ -161,7 +160,7 @@ def force_save():
 
 db = load_data()
 
-# ------------------- Новая система ролей -------------------
+# ------------------- Система ролей -------------------
 ROLES = {
     "6": {"name": "Системный администратор", "level": 6, "emoji": "👑", "description": "Полный доступ ко всем командам"},
     "5": {"name": "Администрация GRAND", "level": 5, "emoji": "⭐", "description": "Управление ботом, настройка ссылок"},
@@ -479,15 +478,12 @@ def process_command(event, text, prefix):
             reply("❌ Нет прав для сохранения данных")
             return
         
-        # Сохраняем данные
         if force_save():
-            # Получаем информацию о сохранении
             last_save = db.get("last_save", "не сохранялось")
             backup_count = 0
             if os.path.exists(BACKUP_DIR):
                 backup_count = len([f for f in os.listdir(BACKUP_DIR) if f.startswith("bot_data_")])
             
-            # Статистика данных
             data_stats = f"""
 📊 **Статистика данных:**
 • Доверенных пользователей: {len(db.get('trusted_users', []))}
@@ -511,7 +507,6 @@ def process_command(event, text, prefix):
             return
         
         if len(args) < 1:
-            # Показываем список доступных бэкапов
             if not os.path.exists(BACKUP_DIR):
                 reply("📭 Нет резервных копий")
                 return
@@ -542,11 +537,8 @@ def process_command(event, text, prefix):
             with open(backup_file, "r", encoding="utf-8") as f:
                 backup_data = json.load(f)
             
-            # Восстанавливаем данные, сохраняя текущего админа
-            old_db = db.copy()
             db.update(backup_data)
             
-            # Сохраняем текущего админа на всякий случай
             if str(ADMIN_ID) not in db["staff_quest"]:
                 db["staff_quest"][str(ADMIN_ID)] = "Системный администратор"
             if ADMIN_ID not in db["trusted_users"]:
@@ -1609,7 +1601,7 @@ def process_command(event, text, prefix):
         for uid in SYSTEM_ADMINS:
             result += f"• {get_user_mention(uid)}\n"
         
-        result += "\n📋 **Сотрудники отдела:**\n"
+        result += "\n📋 **Сотрудники отдела квестов:**\n"
         if db["staff_quest"]:
             for uid, role in db["staff_quest"].items():
                 result += f"• {get_user_mention(int(uid))} - {role}\n"
@@ -1641,7 +1633,7 @@ def process_command(event, text, prefix):
         else:
             result += "Нет системных администраторов\n"
         
-        result += "\n📋 **Сотрудники из staff_quest:**\n"
+        result += "\n📋 **Сотрудники отдела квестов:**\n"
         if db["staff_quest"]:
             for uid, role in db["staff_quest"].items():
                 result += f"• {get_user_mention(int(uid))} - {role}\n"
@@ -1677,7 +1669,6 @@ def process_command(event, text, prefix):
             reply("❌ Только главный администратор")
             return
         
-        # Создаем резервную копию перед очисткой
         create_backup()
         
         db["trusted_users"] = [ADMIN_ID]
@@ -1707,7 +1698,7 @@ def main():
     # Автоматическое сохранение каждые 30 минут
     def auto_save_thread():
         while True:
-            time.sleep(1800)  # 30 минут
+            time.sleep(1800)
             if db.get("auto_save", True):
                 print("🔄 Автосохранение...")
                 force_save()
